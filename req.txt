@@ -1,0 +1,15 @@
+asyncio==3.4.3
+Cython==0.29.24
+dateparser==0.7.1
+firebase-admin==4.4.0
+grpcio==1.39.0
+matplotlib==3.1.2
+numpy==1.19.5
+pandas==1.1.5
+pandas-ta==0.3.02b
+progressbar==2.5
+pytest==3.10.1
+pycrypto
+requests==2.23.0
+requests-toolbelt
+tqdm==4.56.2
