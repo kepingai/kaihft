@@ -1,0 +1,8 @@
+# ignore testing files
+test.txt
+# ignore any environment files
+*env*
+# ignore log
+*.log
+# credential files
+*credential*
