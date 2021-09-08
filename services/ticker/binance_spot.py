@@ -6,7 +6,7 @@ from unicorn_binance_websocket_api.unicorn_binance_websocket_api_manager import 
 # channels and markets and initiate multiplex stream
 # channels x markets = (total subscription)
 channels = {'ticker'}
-markets = {'ethusdt'}
+markets = {'btcusdt','ethusdt', 'adausdt', 'dogeusdt', 'dotusdt', 'uniusdt'}
 
 def main(publisher: KaiPublisherClient):
     """ Retrieve real-time binance data via websocket &
