@@ -83,5 +83,4 @@ class BinanceTickerPublisher():
             high_price=float(data["h"]),
             low_price=float(data["l"]),
             total_traded_base_asset_volume=float(data["v"]),
-            total_traded_quote_asset_volume=float(data["q"]),
-        )
+            total_traded_quote_asset_volume=float(data["q"]))
