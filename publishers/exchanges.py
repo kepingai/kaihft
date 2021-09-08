@@ -5,6 +5,7 @@ from unicorn_binance_websocket_api.unicorn_binance_websocket_api_manager import 
 class BinanceTickerPublisher():
     def __init__(self, 
             websocket: BinanceWebSocketApiManager,
+            stream_id: str,
             publisher: KaiPublisherClient,
             topic_path: str = 'ticker-binance-v0'):
         """ Publish ticker data to defined topic. 
@@ -13,6 +14,8 @@ class BinanceTickerPublisher():
             ----------
             websocket: `BinanceWebSocketApiManager`
                 The websocket to retrieve data.
+            stream_id: `str`
+                The websocket stream id.
             publisher: `PublisherClient`
                 The Cloud Pub/Sub client.
             topic_path: `str`
@@ -20,6 +23,7 @@ class BinanceTickerPublisher():
         """
         self.name = 'BINANCE'
         self.websocket = websocket
+        self.stream_id = stream_id
         self.publisher = publisher
         self.topic_path = topic_path
         self.report_every = 1000

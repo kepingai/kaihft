@@ -1,3 +1,4 @@
+from functools import wraps
 import click, services, logging, os
 from publishers.client import KaiPublisherClient
 
@@ -11,12 +12,25 @@ os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'credentials.json'
 # initialize publisher
 __PUBLISHER = KaiPublisherClient()
 
+def notify_failure(fn: callable):
+    """ This decorator will output the traceback of a 
+        raised exception to slack and the log.
+    """
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        try: return fn(*args, **kwargs)
+        except Exception as error:
+            print(error)
+            raise error
+    return wrapper
+
 @click.group()
 def cli():
     """CLI tool"""
     pass
 
 @cli.command()
+@notify_failure
 def ticker_binance_spot():
     services.ticker.binance_spot.main(__PUBLISHER)
 

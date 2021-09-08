@@ -14,8 +14,10 @@ def main(publisher: KaiPublisherClient):
     """
     # connect to binance.com and create the stream
     # the stream id is returned after calling `create_stream()`
-    binance_websocket_api_manager = BinanceWebSocketApiManager(exchange="binance.com")
-    binance_websocket_api_manager.create_stream(
+    binance_websocket_api_manager = BinanceWebSocketApiManager(
+        exchange="binance.com",
+        throw_exception_if_unrepairable=True)
+    stream_id = binance_websocket_api_manager.create_stream(
         channels=channels, 
         markets=markets, 
         output="UnicornFly")
@@ -23,5 +25,6 @@ def main(publisher: KaiPublisherClient):
     # and run the publisher.
     ticker_publisher = BinanceTickerPublisher(
         websocket=binance_websocket_api_manager,
+        stream_id=stream_id,
         publisher=publisher)
     ticker_publisher.run()
