@@ -1,9 +1,21 @@
+import pandas as pd
 import time, json, logging
 from .client import KaiPublisherClient
+from enum import Enum
 from typing import Tuple
+from pytz import timezone
+from datetime import datetime, timedelta
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 from unicorn_binance_websocket_api.unicorn_binance_websocket_api_manager import BinanceWebSocketApiManager
+
+class KlineStatus(Enum):
+    """ An enum object representing kline status. """
+    OPEN = 'OPEN'
+    CLOSED = 'CLOSED'
+    CLOSING = 'CLOSING'
+    def __str__(self):
+        return str(self.value)
 
 class BaseTickerPublisher():
     def __init__(self, 
@@ -64,18 +76,17 @@ class BaseTickerPublisher():
                 `True` if the kline is closed, else it's still open.
         """
         return dict(
-            symbol=data["s"],
-            timestamp=int(data["T"]),
-            interval=data["i"],
+            symbol=data["s"].upper(),
+            close_time=int(data["T"]),
+            timeframe=data["i"],
             open=float(data["o"]),
             close=float(data["c"]),
             high=float(data["h"]),
             low=float(data["l"]),
-            base_asset_volume=float(data["v"]) if data.get("v") else None,
             number_of_trades=int(data.get("n")) if data.get("n") else None,
             quote_asset_volume=float(data["q"]) if data.get("q") else None,
             taker_buy_base_vol=float(data["V"]) if data.get("V") else None,
-            taker_buy_asset_vol=float(data["Q"]) if data.get("Q") else None,
+            taker_buy_quote_vol=float(data["Q"]) if data.get("Q") else None,
         ), bool(data['x'])
 
 class BinanceTickerPublisher(BaseTickerPublisher):
@@ -129,6 +140,17 @@ class BinanceTickerPublisher(BaseTickerPublisher):
                 count = 0
 
 class BinanceKlinesPublisher(BaseTickerPublisher):
+    # initialize globals that will be used
+    # throughout the exchanges class here.
+    __FLOATINGS = [
+            "open", "high", "close", "low", 
+            "volume", "quote_asset_volume",
+            "taker_buy_base_vol", "taker_buy_quote_vol"]
+    __COLUMNS = [
+        "timestamp", "open", "high", "low", "close", 
+        "volume", "close_time","quote_asset_volume", "number_of_trades", 
+        "taker_buy_base_vol", "taker_buy_quote_vol",  "ignore"] 
+    __DROP = ["timestamp", "ignore"]
     def __init__(self, 
             client: Client,
             websocket: BinanceWebSocketApiManager,
@@ -155,7 +177,7 @@ class BinanceKlinesPublisher(BaseTickerPublisher):
             markets: `list`
                 A list containing the symbols.
         """
-        super(BinanceTickerPublisher, self).__init__(
+        super().__init__(
             name='BINANCE', websocket=websocket, stream_id=stream_id, 
             publisher=publisher, topic_path=topic_path)
         assert n_klines <= 1000
@@ -163,31 +185,66 @@ class BinanceKlinesPublisher(BaseTickerPublisher):
         self.n_klines = n_klines
         self.markets = markets
         self.sleep = 0.05
-        self.markets_klines = self.initialize_klines()
+        self.markets_klines, self.kline_status = self.initialize_klines()
     
     def initialize_klines(self):
         """Initialize all historical n-klines for the specified markets."""
+        # initialize market klines, kline status and
+        # specified interval for the hitorical klines
         markets_klines = {}
+        kline_status = {}
+        _interval = 15
+        interval = self.client.KLINE_INTERVAL_15MINUTE
+        start = (datetime.utcnow() - 
+            timedelta(minutes=_interval * self.n_klines)).timestamp()
         for market in self.markets:
             start = time.time()
             try:
                 # retrieve the last historical n-klines 
                 klines = self.client.get_historical_klines(
                     market.upper(),
-                    interval=self.client.KLINE_INTERVAL_15MINUTE,
+                    start_str=str(start),
+                    interval=interval,
                     limit=self.n_klines)
             except BinanceAPIException as e:
                 if e.status_code == 400: continue
                 else: logging.info(f"Exception caught retrieving historical klines: {e}")
             # ensure that klines requests are successful
             if klines is None or len(klines) == 0: continue
-            try:
-                markets_klines[market.upper()] = self.to_dataframe(klines)
-            except Exception as e:
-                logging.info(f"Exception caught converting to df: {e}")
+            symbol = market.upper()
+            markets_klines[symbol] = self.to_dataframe(
+                symbol=symbol, interval=str(interval), klines=klines)
+            # check if the market kline have closed
+            kline_status[symbol] = (KlineStatus.CLOSED if 
+                datetime.utcnow().minute % _interval == 0 else KlineStatus.OPEN)
             # if all successful calculate the
             # the overall execution time and delay if needed
             self.delay(start)
+        return markets_klines, kline_status
+
+    def to_dataframe(self, symbol: str, interval: str, klines: list) -> pd.DataFrame:
+        """Will convert klines from binance to dataframe.
+
+            Parameters
+            ----------
+            symbol: `str`
+                The symbol of instrument.
+            interval: `str`
+                The interval of the symbol.
+            klines: `list`
+                A list of list containing binance formatted klines.
+            
+            Returns
+            -------
+            `pd.DataFrame`
+                The dataframe formatted klines.
+        """
+        dataframe = pd.DataFrame(klines, columns=self.__COLUMNS)
+        dataframe['symbol'] = symbol.upper()
+        dataframe['timeframe'] = interval
+        dataframe[self.__FLOATINGS] = dataframe[self.__FLOATINGS].astype('float32')
+        dataframe.drop(columns=self.__DROP, inplace=True)
+        return dataframe
     
     def delay(self, start: time):
         """ Get the difference between now and
@@ -218,20 +275,77 @@ class BinanceKlinesPublisher(BaseTickerPublisher):
             else:
                 stream = json.loads(oldest_stream_data_from_stream_buffer)
                 if 'data' not in stream: continue
-                data = self.format_binance_kline_to_dict(stream['k'])
-                # if the kline retrieve is closed
-                # TODO append new kline to market klines dataframe
-                # and remove the first row to keep n_klines
-
-                # if the kline retrieve is not closed
-                # replace the last row of the market_klines dataframe
-
+                data, closed = self.format_binance_kline_to_dict(stream['data']['k'])
+                symbol = data['symbol'].upper()
+                # try:
+                # update the market closed dictionary
+                self.kline_status[symbol] = (KlineStatus.CLOSING 
+                    if closed else KlineStatus.OPEN)
+                # update the dataframe appropriately
+                klines = self.update_klines(symbol, data)
+                # publish klines
                 self.publisher.publish(
                     origin=self.__class__.__name__,
-                    topic_path=self.topic_path,
-                    data=data,
-                    attributes=dict(symbol=data['symbol']))
+                    topic_path=self.topic_path, 
+                    data=klines,
+                    attributes=dict(symbol=symbol))
+                # except Exception as e:
+                #     logging.info(f"Exception klines update: {e}")
             count += 1
             if count % self.log_every == 0:
                 logging.info(self.websocket.print_summary(disable_print=True))
                 count = 0
+    
+    def update_klines(self, symbol: str, data: dict) -> dict:
+        """ Update symbol klines with the new data
+
+            Parameters
+            ----------
+            symbol: `str`
+                The symbol of the market.
+            data: `dict`
+                Dictionary formatted data.
+            
+            Returns
+            -------
+            `dict`
+                Dataframe of klines represented
+                into a dictionary format.
+
+            Example
+            -------
+            .. code-block:: python
+            {
+                'open': [25.989999771118164, 25.920000076293945, 25.920000076293945], 
+                'high': [26.020000457763672, 26.0, 25.96999931335449], 
+                'low': [25.79999923706055, 25.84000015258789, 25.739999771118164], 
+                'close': [25.93000030517578, 25.920000076293945, 25.76000022888184], 
+                'volume': [20038.5703125, 22381.650390625, 12299.23046875], 
+                'quote_asset_volume': [518945.0625, 580255.5, 317816.84375], 
+                'number_of_trades': [733, 759, 619], 
+                'taker_buy_base_vol': [9005.06, 12899.83, 3608.93], 
+                'taker_buy_quote_vol': [233168.995, 334395.2921, 93283.808], 
+                'close_time': [1630031399999, 1630032299999, 1630033199999], 
+                'symbol': ['UNIUSDT', 'UNIUSDT', 'UNIUSDT'], 
+                'timeframe': ['15m', '15m', '15m']
+            }
+        """
+        # retrieve the specific klines
+        # of the specific symbol and status
+        status = self.kline_status[symbol]
+        klines = self.markets_klines[symbol]
+        # update the kline appropriately        
+        if status == KlineStatus.CLOSING: 
+            # update the last row kline and close the kline
+            klines.at[len(klines) - 1, list(data.keys())] = list(data.values())
+            status = KlineStatus.CLOSED
+        elif status == KlineStatus.CLOSED:
+            # append the klines dataframe with new kline
+            # remove the first row of the kline for memory
+            klines.at[len(klines), list(data.keys())] = list(data.values())
+            klines(klines.head(1).index, inplace=True)
+        else:
+            # kline is still open so update the last row
+            klines.at[len(klines) - 1, list(data.keys())] = list(data.values())
+        # return the klines into dictionary format
+        return klines.to_dict('list')

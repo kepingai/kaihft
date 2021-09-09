@@ -32,9 +32,24 @@ def cli():
     pass
 
 @cli.command()
+@click.option('--topic', default='ticker-binance-v0', help='topic path name in cloud pub/sub.')
 @notify_failure
-def ticker_binance_spot():
-    services.ticker.binance_spot.main(__PUBLISHER, __MARKETS)
+def ticker_binance_spot(topic):
+    services.ticker_binance_spot.main(
+        publisher=__PUBLISHER, 
+        markets=__MARKETS,
+        topic_path=topic)
+
+@cli.command()
+@click.option('--klines', default=250, help='the length of historical klines back.')
+@click.option('--topic', default='klines-binance-v0', help='topic path name in cloud pub/sub.')
+@notify_failure
+def klines_binance_spot(klines, topic):
+    services.klines_binance_spot.main(
+        publisher=__PUBLISHER,
+        n_klines=klines,
+        markets=__MARKETS,
+        topic_path=topic)
 
 if __name__ == "__main__":
     cli()
