@@ -1,3 +1,4 @@
 click==7.1.2
 unicorn-binance-websocket-api==1.33.0
 google-cloud-pubsub==2.8.0
+python-binance==0.7.5

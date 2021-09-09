@@ -2,16 +2,14 @@ from publishers.exchanges import BinanceTickerPublisher
 from publishers.client import KaiPublisherClient
 from unicorn_binance_websocket_api.unicorn_binance_websocket_api_manager import BinanceWebSocketApiManager
 
-# binance only allows 1024 subscriptions in one stream
-# channels and markets and initiate multiplex stream
-# channels x markets = (total subscription)
-channels = {'ticker'}
-markets = {'btcusdt','ethusdt', 'adausdt', 'dogeusdt', 'dotusdt', 'uniusdt'}
-
-def main(publisher: KaiPublisherClient):
+def main(publisher: KaiPublisherClient, markets: dict):
     """ Retrieve real-time binance data via websocket &
         then publish binance tickers to Cloud Pub/Sub. 
     """
+    # binance only allows 1024 subscriptions in one stream
+    # channels and markets and initiate multiplex stream
+    # channels x markets = (total subscription)
+    channels = {'ticker'}
     # connect to binance.com and create the stream
     # the stream id is returned after calling `create_stream()`
     binance_websocket_api_manager = BinanceWebSocketApiManager(
@@ -19,8 +17,7 @@ def main(publisher: KaiPublisherClient):
         throw_exception_if_unrepairable=True)
     stream_id = binance_websocket_api_manager.create_stream(
         channels=channels, 
-        markets=markets, 
-        output="UnicornFly")
+        markets=markets)
     # initialize binance ticker publisher
     # and run the publisher.
     ticker_publisher = BinanceTickerPublisher(

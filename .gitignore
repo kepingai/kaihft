@@ -1,5 +1,5 @@
 # ignore testing files
-test.txt
+test*
 # ignore any environment files
 *env*
 # ignore log
