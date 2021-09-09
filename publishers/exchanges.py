@@ -24,7 +24,7 @@ class BaseTickerPublisher():
                  stream_id: any,
                  publisher: KaiPublisherClient,
                  topic_path: str,
-                 log_every: int = 1000):
+                 log_every: int = 100000):
         """ Base ticker publisher subclass. """
         self.name = name
         self.websocket = websocket
@@ -195,7 +195,7 @@ class BinanceKlinesPublisher(BaseTickerPublisher):
         kline_status = {}
         _interval = 15
         interval = self.client.KLINE_INTERVAL_15MINUTE
-        start = (datetime.utcnow() - 
+        start_timestamp = (datetime.utcnow() - 
             timedelta(minutes=_interval * self.n_klines)).timestamp()
         for market in self.markets:
             start = time.time()
@@ -203,9 +203,8 @@ class BinanceKlinesPublisher(BaseTickerPublisher):
                 # retrieve the last historical n-klines 
                 klines = self.client.get_historical_klines(
                     market.upper(),
-                    start_str=str(start),
-                    interval=interval,
-                    limit=self.n_klines)
+                    start_str=str(start_timestamp),
+                    interval=interval)
             except BinanceAPIException as e:
                 if e.status_code == 400: continue
                 else: logging.info(f"Exception caught retrieving historical klines: {e}")
@@ -277,10 +276,11 @@ class BinanceKlinesPublisher(BaseTickerPublisher):
                 if 'data' not in stream: continue
                 data, closed = self.format_binance_kline_to_dict(stream['data']['k'])
                 symbol = data['symbol'].upper()
-                # try:
-                # update the market closed dictionary
-                self.kline_status[symbol] = (KlineStatus.CLOSING 
-                    if closed else KlineStatus.OPEN)
+                # if kline is not closed update the current
+                # status of the kline either closing ot still open
+                if self.kline_status[symbol] != KlineStatus.CLOSED:
+                    self.kline_status[symbol] = (KlineStatus.CLOSING 
+                        if closed else KlineStatus.OPEN)
                 # update the dataframe appropriately
                 klines = self.update_klines(symbol, data)
                 # publish klines
@@ -289,8 +289,6 @@ class BinanceKlinesPublisher(BaseTickerPublisher):
                     topic_path=self.topic_path, 
                     data=klines,
                     attributes=dict(symbol=symbol))
-                # except Exception as e:
-                #     logging.info(f"Exception klines update: {e}")
             count += 1
             if count % self.log_every == 0:
                 logging.info(self.websocket.print_summary(disable_print=True))
@@ -333,19 +331,26 @@ class BinanceKlinesPublisher(BaseTickerPublisher):
         # retrieve the specific klines
         # of the specific symbol and status
         status = self.kline_status[symbol]
-        klines = self.markets_klines[symbol]
         # update the kline appropriately        
         if status == KlineStatus.CLOSING: 
+            logging.info(f"{symbol}-kline-{self.kline_status[symbol]}: length: {len(self.markets_klines[symbol])}")
             # update the last row kline and close the kline
-            klines.at[len(klines) - 1, list(data.keys())] = list(data.values())
-            status = KlineStatus.CLOSED
+            self.markets_klines[symbol].at[len(self.markets_klines[symbol]) 
+                - 1, list(data.keys())] = list(data.values())
+            self.kline_status[symbol] = KlineStatus.CLOSED
+            logging.info(f"{symbol}-kline-{self.kline_status[symbol]}: length: {len(self.markets_klines[symbol])}")
         elif status == KlineStatus.CLOSED:
             # append the klines dataframe with new kline
             # remove the first row of the kline for memory
-            klines.at[len(klines), list(data.keys())] = list(data.values())
-            klines(klines.head(1).index, inplace=True)
+            self.markets_klines[symbol].at[len(self.markets_klines[symbol]), 
+                list(data.keys())] = list(data.values())
+            self.markets_klines[symbol].drop(
+                self.markets_klines[symbol].head(1).index, inplace=True)
+            self.kline_status[symbol] = KlineStatus.OPEN
+            logging.info(f"{symbol}-kline-{self.kline_status[symbol]}: length: {len(self.markets_klines[symbol])}")
         else:
             # kline is still open so update the last row
-            klines.at[len(klines) - 1, list(data.keys())] = list(data.values())
+            self.markets_klines[symbol].at[len(self.markets_klines[symbol]) - 1, 
+                list(data.keys())] = list(data.values())
         # return the klines into dictionary format
-        return klines.to_dict('list')
+        return self.markets_klines[symbol].to_dict('list')
