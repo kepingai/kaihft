@@ -7,11 +7,11 @@ logging.basicConfig(level=logging.INFO,
                     filename='logs/' + os.path.basename(__file__) + '.log',       
                     format="{asctime} [{levelname:8}] {process} {thread} {module}: {message}",       
                     style="{")
+# set environment credentials
+os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'credentials.json'
 # initialize publisher
 __PUBLISHER = KaiPublisherClient()
 __MARKETS = {'btcusdt','ethusdt', 'adausdt', 'dogeusdt', 'dotusdt', 'uniusdt'}
-# set environment credentials
-os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'credentials.json'
 
 def notify_failure(fn: callable):
     """ This decorator will output the traceback of a 
