@@ -83,6 +83,7 @@ class BaseTickerPublisher():
             close=float(data["c"]),
             high=float(data["h"]),
             low=float(data["l"]),
+            volume=float(data["v"]),
             number_of_trades=int(data.get("n")) if data.get("n") else None,
             quote_asset_volume=float(data["q"]) if data.get("q") else None,
             taker_buy_base_vol=float(data["V"]) if data.get("V") else None,
@@ -333,12 +334,10 @@ class BinanceKlinesPublisher(BaseTickerPublisher):
         status = self.kline_status[symbol]
         # update the kline appropriately        
         if status == KlineStatus.CLOSING: 
-            logging.info(f"{symbol}-kline-{self.kline_status[symbol]}: length: {len(self.markets_klines[symbol])}")
             # update the last row kline and close the kline
             self.markets_klines[symbol].at[len(self.markets_klines[symbol]) 
                 - 1, list(data.keys())] = list(data.values())
             self.kline_status[symbol] = KlineStatus.CLOSED
-            logging.info(f"{symbol}-kline-{self.kline_status[symbol]}: length: {len(self.markets_klines[symbol])}")
         elif status == KlineStatus.CLOSED:
             # append the klines dataframe with new kline
             # remove the first row of the kline for memory
@@ -347,7 +346,6 @@ class BinanceKlinesPublisher(BaseTickerPublisher):
             self.markets_klines[symbol].drop(
                 self.markets_klines[symbol].head(1).index, inplace=True)
             self.kline_status[symbol] = KlineStatus.OPEN
-            logging.info(f"{symbol}-kline-{self.kline_status[symbol]}: length: {len(self.markets_klines[symbol])}")
         else:
             # kline is still open so update the last row
             self.markets_klines[symbol].at[len(self.markets_klines[symbol]) - 1, 
