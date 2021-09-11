@@ -1,5 +1,6 @@
 import pandas as pd
-import time, json, logging
+import time, json
+import logging
 from .client import KaiPublisherClient
 from enum import Enum
 from typing import Tuple
@@ -91,6 +92,7 @@ class BaseTickerPublisher():
         ), bool(data['x'])
 
 class BinanceTickerPublisher(BaseTickerPublisher):
+    # logging verbose mode
     def __init__(self, 
             websocket: BinanceWebSocketApiManager,
             stream_id: str,
@@ -208,7 +210,7 @@ class BinanceKlinesPublisher(BaseTickerPublisher):
                     interval=interval)
             except BinanceAPIException as e:
                 if e.status_code == 400: continue
-                else: logging.info(f"Exception caught retrieving historical klines: {e}")
+                else: logging.debug(f"Exception caught retrieving historical klines: {e}")
             # ensure that klines requests are successful
             if klines is None or len(klines) == 0: continue
             symbol = market.upper()
