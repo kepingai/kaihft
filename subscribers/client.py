@@ -44,4 +44,4 @@ class KaiSubscriberClient():
                 streaming_pull_future.cancel()  
                 # Block until the shutdown is complete.
                 streaming_pull_future.result()  
-                logging.debug(f"Exception caught {self.subscription_id}, Error: {e}")
+                logging.error(f"Exception caught {self.subscription_id}, Error: {e}")

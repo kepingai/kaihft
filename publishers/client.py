@@ -2,9 +2,9 @@ from google.cloud.pubsub import PublisherClient
 
 class KaiPublisherClient():
     def __init__(self):
-        """ All publish / receiving messages are handeled here."""
+        """ Publishing messages are handeled here."""
         self.client = PublisherClient()
-        self.username = 'khft@kepingai.com'
+        self.username = 'service-account-kft'
         self.project_id = 'keping-ai-continuum'
 
     def publish(self,

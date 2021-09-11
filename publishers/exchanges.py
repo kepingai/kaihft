@@ -1,10 +1,8 @@
 import pandas as pd
-import time, json
-import logging
+import time, json, logging
 from .client import KaiPublisherClient
 from enum import Enum
 from typing import Tuple
-from pytz import timezone
 from datetime import datetime, timedelta
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
@@ -33,6 +31,8 @@ class BaseTickerPublisher():
         self.publisher = publisher
         self.topic_path = topic_path
         self.log_every = log_every
+        logging.info(f"ticker publisher initialized {self.name}, {self.websocket}, "
+            f"from: {self.stream_id}, to: {self.topic_path}, will log update every: {self.log_every} messages.")
     
     def format_binance_ticker_to_dict(self, data) -> dict:
         """ Will format binance ticker websocket data to dictionary. 
@@ -210,7 +210,7 @@ class BinanceKlinesPublisher(BaseTickerPublisher):
                     interval=interval)
             except BinanceAPIException as e:
                 if e.status_code == 400: continue
-                else: logging.debug(f"Exception caught retrieving historical klines: {e}")
+                else: logging.error(f"Exception caught retrieving historical klines: {e}")
             # ensure that klines requests are successful
             if klines is None or len(klines) == 0: continue
             symbol = market.upper()
@@ -221,7 +221,9 @@ class BinanceKlinesPublisher(BaseTickerPublisher):
                 datetime.utcnow().minute % _interval == 0 else KlineStatus.OPEN)
             # if all successful calculate the
             # the overall execution time and delay if needed
+            logging.info(f"initialized klines: {market}-{interval} - duration: {time.time() - start} seconds")
             self.delay(start)
+        logging.info(f"successful kline initializations: {self.markets}-{interval}")
         return markets_klines, kline_status
 
     def to_dataframe(self, symbol: str, interval: str, klines: list) -> pd.DataFrame:
