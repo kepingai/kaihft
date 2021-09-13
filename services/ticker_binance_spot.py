@@ -6,7 +6,8 @@ from unicorn_binance_websocket_api.unicorn_binance_websocket_api_manager import 
 def main(
     publisher: KaiPublisherClient, 
     markets: dict, 
-    production: bool):
+    production: bool,
+    topic_path: str = 'ticker-binance-v0'):
     """ Retrieve real-time binance data via websocket &
         then publish binance tickers to Cloud Pub/Sub. 
 
@@ -19,11 +20,13 @@ def main(
             retrieve data from websocket.
         production: `bool`
             if `True` publisher will publish to production topic.
+        topic_path: `str`
+            The topic path to publish ticker.
     """
     if production:
-        topic_path = 'ticker-binance-v0'
-        logging.warn(f"[production-mode] tickers-BINANCE-SPOT, markets: {markets}, topic: {topic_path}")
-    else: topic_path = 'dev-ticker-binance-v0'
+        topic_path = f'prod-{topic_path}'
+        logging.warn(f"[production-mode] tickers-BINANCE-SPOT, markets: {markets}, topic: prod-{topic_path}")
+    else: topic_path = f'dev-{topic_path}'
     # binance only allows 1024 subscriptions in one stream
     # channels and markets and initiate multiplex stream
     # channels x markets = (total subscription)

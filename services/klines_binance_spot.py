@@ -8,7 +8,8 @@ def main(
     publisher: KaiPublisherClient, 
     n_klines: int, 
     markets: dict, 
-    production: bool):
+    production: bool,
+    topic_path: str = 'klines-binance-v0'):
     """ Retrieve real-time binance data via websocket &
         then publish binance klines to Cloud Pub/Sub. 
         
@@ -23,11 +24,13 @@ def main(
             retrieve data from websocket.
         production: `bool`
             if `True` publisher will publish to production topic.
+        topic_path: `str`
+            The topic path to publish klines.
     """
     if production:
-        topic_path = 'klines-binance-v0'
-        logging.warn(f"[production-mode] klines: {n_klines}-BINANCE-SPOT, markets: {markets}, topic: {topic_path}")
-    else: topic_path = 'dev-klines-binance-v0'
+        topic_path = f"prod-{topic_path}"
+        logging.warn(f"[production-mode] klines: {n_klines}-BINANCE-SPOT, markets: {markets}, topic: prod-{topic_path}")
+    else: topic_path = f'dev-{topic_path}'
     # binance only allows 1024 subscriptions in one stream
     # channels and markets and initiate multiplex stream
     # channels x markets = (total subscription)

@@ -1,11 +1,14 @@
+import json
 from google.cloud.pubsub import PublisherClient
 
 class KaiPublisherClient():
-    def __init__(self):
+    def __init__(self, 
+                 username: str = 'service-account-kft',
+                 project_id: str = 'keping-ai-continuum'):
         """ Publishing messages are handeled here."""
         self.client = PublisherClient()
-        self.username = 'service-account-kft'
-        self.project_id = 'keping-ai-continuum'
+        self.username = username
+        self.project_id = project_id
 
     def publish(self,
                 origin: str,
@@ -32,7 +35,7 @@ class KaiPublisherClient():
         """
         # encode the data to string utf-8 format
         # get the appropriate topic path
-        _data = str(dict(data=data)).encode("utf-8")
+        _data = json.dumps(dict(data=data)).encode('utf-8')
         _topic_path = self.client.topic_path(self.project_id, topic_path)
         # add extra stuff to the origin before publishing message
         attributes.update({'origin': origin, 'username': self.username})

@@ -92,7 +92,6 @@ class BaseTickerPublisher():
         ), bool(data['x'])
 
 class BinanceTickerPublisher(BaseTickerPublisher):
-    # logging verbose mode
     def __init__(self, 
             websocket: BinanceWebSocketApiManager,
             stream_id: str,

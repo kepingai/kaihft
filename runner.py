@@ -1,7 +1,5 @@
 from functools import wraps
-from logging import handlers
 import click, services, logging, os
-from logging.handlers import RotatingFileHandler
 from publishers.client import KaiPublisherClient
 
 # logging verbose mode
@@ -56,12 +54,15 @@ def klines_binance_spot(klines, production):
 
 @cli.command()
 @click.option('--strategy', default="STS", help="available strategies: 'STS'")
+@click.option('--version', default='v0', help="the version of signal engine.")
 @click.option('--production', is_flag=True, help='publish & subscribe messages to production topic.')
 @notify_failure
-def signal_binance_spot(strategy, production):
-    services.signal_binance_spot.main(
+def signal_binance_spot(strategy, version, production):
+    services.signal_engine.main(
+        exchange='binance',
         strategy=strategy,
-        production=production)
+        production=production,
+        version=version)
 
 if __name__ == "__main__":
     cli()
