@@ -45,7 +45,8 @@ def main(exchange: str,
         "signal": dict(id=signal_topic_path, timeout=3.0)
     }
     signal_engine = SignalEngine(
-        topic_path=dist_topic_path,
+        signal_topic_path=signal_topic_path,
+        dist_topic_path=dist_topic_path,
         publisher=KaiPublisherClient(),
         subscriber=KaiSubscriberClient(),
         subscriptions_params=params,

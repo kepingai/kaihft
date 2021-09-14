@@ -1,13 +1,17 @@
+from google.cloud.pubsub_v1 import publisher
 import pandas as pd
 import logging, json, threading
+from datetime import datetime
 from google.cloud import pubsub_v1
 from publishers.client import KaiPublisherClient
 from subscribers.client import KaiSubscriberClient
+from .strategy import get_strategy, Strategy
 
 class SignalEngine():
     def __init__(
         self,
-        topic_path: str,
+        signal_topic_path: str,
+        dist_topic_path: str,
         publisher: KaiPublisherClient,
         subscriber: KaiSubscriberClient,
         subscriptions_params: dict,
@@ -20,6 +24,10 @@ class SignalEngine():
 
             Parameters
             ----------
+            signal_topic_path: `str`
+                The signal topic path for current signal status.
+            dist_topic_path: `str`
+                Is the distribution-signal topic path for new signals.
             subscriber: `KaiSubscriberClient`
                 The subscriber client.
             subscriptions_params: `dict`
@@ -42,11 +50,12 @@ class SignalEngine():
                 }
             }
         """
-        self.topic_path = topic_path
+        self.signal_topic_path = signal_topic_path
+        self.dist_topic_path = dist_topic_path
         self.publisher = publisher
         self.subscriber = subscriber
         self.subscriptions_params = self.validate_params(subscriptions_params)
-        self.strategy = self.validate_strategy(strategy)
+        self.strategy = self._get_strategy(strategy)
         # initialize running async threads registry
         self.async_registry = {}
     
@@ -77,7 +86,7 @@ class SignalEngine():
             ticker_thread.start()
             klines_thread.start()
         finally:
-            logging.warn(f"[stops] signal engine stops! - strategy: {self.strategy}, subscriber: {self.subscriber}")
+            logging.info(f"[synced] ticker-klines signal engine synced! - strategy: {self.strategy}, subscriber: {self.subscriber}")
             
     def update_signals(self, message: pubsub_v1.subscriber.message.Message):
         """ Update signals with the most recent data. 
@@ -92,8 +101,10 @@ class SignalEngine():
             symbol = message.attributes.get("symbol")
             if symbol in self.signals:
                 # begin update to signal object
-                self.signals['symbol'].update(
-                    ticker=json.loads(message.data.decode('utf-8'))['data'])
+                last_price = json.loads(message.data
+                    .decode('utf-8'))['data']['last_price']
+                # update signal with the lastest price
+                self.signals['symbol'].update(last_price=last_price)
             # acknowledge the message only if
             message.ack()
 
@@ -115,11 +126,13 @@ class SignalEngine():
                     target=self.run_strategy,
                     args=(symbol, klines),
                     name=f'[scout] potential-signal-run: symbol: {symbol}')
-                # the current symbol in registry
+                # add the current symbol in registry
                 self.async_registry[symbol] = scout_thread
+                # start the scouting thread
                 scout_thread.start()
+                # acknowledge the message
                 message.ack()
-
+                
     def run_strategy(self, symbol: str, klines: dict):
         """ Run strategy to the given klines data. 
 
@@ -150,8 +163,49 @@ class SignalEngine():
                 }
             }
         """
-        logging.info(f"[strategy] running strategy - {self.strategy} symbol: {klines['symbol']} - n_klines: {len(klines['open'])}")
+        try:
+            # will convert klines to dataframe and
+            # format the dataframe appropriately
+            dataframe = pd.DataFrame(klines)
+            dataframe = self.format_dataframe(dataframe)
+            # run technical analysis & inference to layer 2
+            signal = self.strategy.scout(symbol=symbol, 
+                dataframe=dataframe, 
+                callback=self.close_signal)
+            # if signal is triggered
+            if signal: 
+                # save the signal to class attrs
+                self.signals[symbol] = signal
+                # distribute the signal
+                self.distribute_signal(signal)
+                self.publish_signals()
+        except Exception as e:
+            logging.error(f"[strategy] Exception caught, symbol:-{symbol}, error: {e}")
+        # ensure that the thread is deleted
+        # to prevent any grid-locks during production.
         del self.async_registry[symbol]
+    
+    def format_dataframe(self, dataframe: pd.DataFrame) -> pd.DataFrame:
+        """ Will format the dataframe to ensure appropriate format for
+            inferencing to layer 2 without errors.
+
+            Parameters
+            ----------
+            dataframe: `pd.DataFrame`
+                The dataframe to format.
+            
+            Returns
+            -------
+            `pd.DataFrame`
+                Newly formatted dataframe.
+        """
+        ohlcv = ['open', 'high', 'close', 'low', 'volume']
+        # convert the close time to utc string datetime
+        dataframe['datetime'] = dataframe.close_time.apply(
+            lambda x: str(pd.to_datetime(datetime.utcfromtimestamp(
+                (x / 1000)).strftime('%c'))))
+        dataframe[ohlcv] = dataframe[ohlcv].astype('float32')
+        return dataframe
         
     def subscribe(self, 
                   subscription: str, 
@@ -208,15 +262,20 @@ class SignalEngine():
             'timeout' in params['klines']), "Subscription klines param badly formatted."
         return params
     
-    def validate_strategy(self, strategy: str) -> bool:
-        """ Will return true if strategy is supported. 
+    def _get_strategy(self, strategy: str) -> Strategy:
+        """ Will return the strategy chosen.
+
             Parameters
             ----------
             strategy: `str`
                 The strategy to run.
             Returns
             -------
-            `bool`
-                True if strategy is supported.
+            `Strategy`
+                A strategy inherited instance.
+            Raises
+            ------
+            `KeyError`
+                If key id not match or strategy not available.
         """
-        return strategy == 'STS'
+        return get_strategy(strategy)()
