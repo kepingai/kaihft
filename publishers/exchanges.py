@@ -1,3 +1,4 @@
+from multiprocessing import Value
 import pandas as pd
 import time, json, logging
 from .client import KaiPublisherClient
@@ -12,17 +13,17 @@ class KlineStatus(Enum):
     """ An enum object representing kline status. """
     OPEN = 'OPEN'
     CLOSED = 'CLOSED'
-    CLOSING = 'CLOSING'
     def __str__(self):
         return str(self.value)
 
-class BaseTickerPublisher():
+class BaseTickerKlinesPublisher():
     def __init__(self, 
                  name: str,
                  websocket: any,
                  stream_id: any,
                  publisher: KaiPublisherClient,
                  topic_path: str,
+                 quotes: list,
                  log_every: int = 100000):
         """ Base ticker publisher subclass. """
         self.name = name
@@ -31,6 +32,7 @@ class BaseTickerPublisher():
         self.publisher = publisher
         self.topic_path = topic_path
         self.log_every = log_every
+        self.quotes = quotes
         logging.info(f"ticker publisher initialized {self.name}, {self.websocket}, "
             f"from: {self.stream_id}, to: {self.topic_path}, will log update every: {self.log_every} messages.")
     
@@ -90,12 +92,35 @@ class BaseTickerPublisher():
             taker_buy_base_vol=float(data["V"]) if data.get("V") else None,
             taker_buy_quote_vol=float(data["Q"]) if data.get("Q") else None,
         ), bool(data['x'])
+    
+    def get_base_quote(self, symbol: str) -> Tuple[str, str]:
+        """ Will return the allowed base and quote from
+            current signal enginge.
 
-class BinanceTickerPublisher(BaseTickerPublisher):
+            Parameters
+            ----------
+            symbol: `str`
+                The full basequote symbol.
+            
+            Returns
+            -------
+            `Tuple[str, str]` 
+                A tuple of base, quote.
+        """
+        _symbol = symbol.upper()
+        for quote in self.quotes:
+            _quote = quote.upper()
+            if symbol.upper().endswith(_quote):
+                return _symbol.split(quote)[0], _quote
+        raise ValueError(f"base/quote from symbol: {symbol}"
+            f"is not applicable to signal engine!")
+
+class BinanceTickerPublisher(BaseTickerKlinesPublisher):
     def __init__(self, 
             websocket: BinanceWebSocketApiManager,
             stream_id: str,
             publisher: KaiPublisherClient,
+            quotes: list = ["USDT"],
             topic_path: str = 'ticker-binance-v0'):
         """ Publish ticker data to defined topic. 
 
@@ -107,12 +132,14 @@ class BinanceTickerPublisher(BaseTickerPublisher):
                 The websocket stream id.
             publisher: `PublisherClient`
                 The Cloud Pub/Sub client.
+            quotes: `list`
+                A list containing allowed quotes.
             topic_path: `str`
                 The topic path to publish data.
         """
         super(BinanceTickerPublisher, self).__init__(
             name='BINANCE', websocket=websocket, stream_id=stream_id, 
-            publisher=publisher, topic_path=topic_path)
+            publisher=publisher, topic_path=topic_path, quotes=quotes)
     
     def run(self):
         """ Load,format data from websocket manager & publish
@@ -131,17 +158,21 @@ class BinanceTickerPublisher(BaseTickerPublisher):
                 stream = json.loads(oldest_stream_data_from_stream_buffer)
                 if 'data' not in stream: continue
                 data = self.format_binance_ticker_to_dict(stream['data'])
+                base, quote = self.get_base_quote(data['symbol'])
                 self.publisher.publish(
                     origin=self.__class__.__name__,
                     topic_path=self.topic_path,
                     data=data,
-                    attributes=dict(symbol=data['symbol']))
+                    attributes=dict(
+                        base=base,
+                        quote=quote,
+                        symbol=data['symbol']))
             count += 1
             if count % self.log_every == 0:
                 logging.info(self.websocket.print_summary(disable_print=True))
                 count = 0
 
-class BinanceKlinesPublisher(BaseTickerPublisher):
+class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
     # initialize globals that will be used
     # throughout the exchanges class here.
     __FLOATINGS = [
@@ -158,6 +189,7 @@ class BinanceKlinesPublisher(BaseTickerPublisher):
             websocket: BinanceWebSocketApiManager,
             stream_id: str,
             publisher: KaiPublisherClient,
+            quotes: list = ["USDT"],
             topic_path: str = 'klines-binance-v0',
             n_klines: int = 250,
             markets: list = ['BTCUSDT']):
@@ -181,7 +213,7 @@ class BinanceKlinesPublisher(BaseTickerPublisher):
         """
         super().__init__(
             name='BINANCE', websocket=websocket, stream_id=stream_id, 
-            publisher=publisher, topic_path=topic_path)
+            publisher=publisher, topic_path=topic_path, quotes=quotes)
         assert n_klines <= 1000
         self.client = client
         self.n_klines = n_klines
@@ -280,19 +312,27 @@ class BinanceKlinesPublisher(BaseTickerPublisher):
                 if 'data' not in stream: continue
                 data, closed = self.format_binance_kline_to_dict(stream['data']['k'])
                 symbol = data['symbol'].upper()
-                # if kline is not closed update the current
-                # status of the kline either closing ot still open
-                if self.kline_status[symbol] != KlineStatus.CLOSED:
-                    self.kline_status[symbol] = (KlineStatus.CLOSING 
-                        if closed else KlineStatus.OPEN)
+                # if kline is closed change the kline status
+                self.kline_status[symbol] = (KlineStatus.CLOSED 
+                    if closed else KlineStatus.OPEN)
                 # update the dataframe appropriately
                 klines = self.update_klines(symbol, data)
+                base, quote = self.get_base_quote(symbol)
                 # publish klines
                 self.publisher.publish(
                     origin=self.__class__.__name__,
                     topic_path=self.topic_path, 
                     data=klines,
-                    attributes=dict(symbol=symbol))
+                    attributes=dict(
+                        base=base,
+                        quote=quote,
+                        symbol=symbol))
+                _klines = pd.DataFrame(klines)
+                _klines['datetime'] = _klines.close_time.apply(
+                    lambda x: str(pd.to_datetime(datetime.utcfromtimestamp(
+                        (x / 1000)).strftime('%c'))))
+                if count % 100 == 0:
+                    print(_klines[['datetime', 'symbol', 'open', 'high', 'low', 'close', 'volume']].tail(5))
             count += 1
             if count % self.log_every == 0:
                 logging.info(self.websocket.print_summary(disable_print=True))
@@ -332,26 +372,20 @@ class BinanceKlinesPublisher(BaseTickerPublisher):
                 'timeframe': ['15m', '15m', '15m']
             }
         """
+        # TODO: FIX THIS KLINE UPDATE MECHANISM
         # retrieve the specific klines
         # of the specific symbol and status
         status = self.kline_status[symbol]
-        # update the kline appropriately        
-        if status == KlineStatus.CLOSING: 
-            # update the last row kline and close the kline
-            self.markets_klines[symbol].at[len(self.markets_klines[symbol]) 
-                - 1, list(data.keys())] = list(data.values())
-            self.kline_status[symbol] = KlineStatus.CLOSED
-        elif status == KlineStatus.CLOSED:
+        if status == KlineStatus.CLOSED:
+            print('closed', symbol)
             # append the klines dataframe with new kline
             # remove the first row of the kline for memory
-            self.markets_klines[symbol].at[len(self.markets_klines[symbol]), 
-                list(data.keys())] = list(data.values())
-            self.markets_klines[symbol].drop(
-                self.markets_klines[symbol].head(1).index, inplace=True)
+            self.markets_klines[symbol] = self.markets_klines[symbol].append(data, ignore_index=True)
+            self.markets_klines[symbol] = self.markets_klines[symbol].iloc[1:]
             self.kline_status[symbol] = KlineStatus.OPEN
         else:
             # kline is still open so update the last row
-            self.markets_klines[symbol].at[len(self.markets_klines[symbol]) - 1, 
+            self.markets_klines[symbol].at[self.markets_klines[symbol].index[-1], 
                 list(data.keys())] = list(data.values())
         # return the klines into dictionary format
         return self.markets_klines[symbol].to_dict('list')

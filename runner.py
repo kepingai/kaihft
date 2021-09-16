@@ -58,7 +58,7 @@ def klines_binance_spot(klines, production):
 @click.option('--production', is_flag=True, help='publish & subscribe messages to production topic.')
 @notify_failure
 def signal_binance_spot(strategy, version, production):
-    services.engine.main(
+    services.signal_engine.main(
         exchange='binance',
         strategy=strategy,
         production=production,

@@ -1,17 +1,19 @@
-from google.cloud.pubsub_v1 import publisher
 import pandas as pd
 import logging, json, threading
 from datetime import datetime
 from google.cloud import pubsub_v1
+from databases import KaiRealtimeDatabase
 from publishers.client import KaiPublisherClient
 from subscribers.client import KaiSubscriberClient
 from .strategy import get_strategy, Strategy
+from .signal import init_signal_from_rtd, Signal
 
 class SignalEngine():
     def __init__(
         self,
-        signal_topic_path: str,
-        dist_topic_path: str,
+        database: KaiRealtimeDatabase,
+        database_ref: str, 
+        topic_path: str,
         publisher: KaiPublisherClient,
         subscriber: KaiSubscriberClient,
         subscriptions_params: dict,
@@ -24,9 +26,11 @@ class SignalEngine():
 
             Parameters
             ----------
-            signal_topic_path: `str`
-                The signal topic path for current signal status.
-            dist_topic_path: `str`
+            database: `KaiRealtimeDatabase`
+                real-time database containing the most-recent signals.
+            database_ref: `str`
+                A string of database reference path.
+            topic_path: `str`
                 Is the distribution-signal topic path for new signals.
             subscriber: `KaiSubscriberClient`
                 The subscriber client.
@@ -50,8 +54,9 @@ class SignalEngine():
                 }
             }
         """
-        self.signal_topic_path = signal_topic_path
-        self.dist_topic_path = dist_topic_path
+        self.database = database
+        self.database_ref = database_ref
+        self.topic_path = topic_path
         self.publisher = publisher
         self.subscriber = subscriber
         self.subscriptions_params = self.validate_params(subscriptions_params)
@@ -118,13 +123,15 @@ class SignalEngine():
         """
         if message.attributes:
             # get the symbol of the klines
+            base = message.attributes.get('base')
+            quote = message.attributes.get('quote')
             symbol = message.attributes.get("symbol")
             if symbol not in self.signals and symbol not in self.async_registry:
                 # run a separate thread to run startegy
                 klines = json.loads(message.data.decode('utf-8'))['data']
                 scout_thread = threading.Thread(
                     target=self.run_strategy,
-                    args=(symbol, klines),
+                    args=(base, quote, symbol, klines),
                     name=f'[scout] potential-signal-run: symbol: {symbol}')
                 # add the current symbol in registry
                 self.async_registry[symbol] = scout_thread
@@ -133,13 +140,21 @@ class SignalEngine():
                 # acknowledge the message
                 message.ack()
                 
-    def run_strategy(self, symbol: str, klines: dict):
+    def run_strategy(self, 
+                     base: str, 
+                     quote: str, 
+                     symbol: str,
+                     klines: dict):
         """ Run strategy to the given klines data. 
 
             Parameters
             ----------
+            base: `str`
+                The base symbol of the ticker.
+            quote: `str`
+                The quote symbol of the ticker.
             symbol: `str`
-                The ticker symbol.
+                The basequote symbol of the ticker.
             klines: `dict`
                 The klines data from Cloud pub/sub.
             
@@ -163,27 +178,68 @@ class SignalEngine():
                 }
             }
         """
-        try:
-            # will convert klines to dataframe and
-            # format the dataframe appropriately
-            dataframe = pd.DataFrame(klines)
-            dataframe = self.format_dataframe(dataframe)
-            # run technical analysis & inference to layer 2
-            signal = self.strategy.scout(symbol=symbol, 
-                dataframe=dataframe, 
-                callback=self.close_signal)
-            # if signal is triggered
-            if signal: 
-                # save the signal to class attrs
-                self.signals[symbol] = signal
-                # distribute the signal
-                self.distribute_signal(signal)
-                self.publish_signals()
-        except Exception as e:
-            logging.error(f"[strategy] Exception caught, symbol:-{symbol}, error: {e}")
+        # try:
+        # will convert klines to dataframe and
+        # format the dataframe appropriately
+        dataframe = pd.DataFrame(klines)
+        dataframe = self.format_dataframe(dataframe)
+        # run technical analysis & inference to layer 2
+        signal = self.strategy.scout(
+            base=base, 
+            quote=quote,
+            dataframe=dataframe, 
+            callback=self.close_signal)
+        # if signal is triggered
+        if signal: 
+            # save the signal to class attrs
+            self.signals[symbol] = signal
+            # distribute the signal
+            self.distribute_signal(signal)
+        # except Exception as e:
+        #     logging.error(f"[strategy] Exception caught running-strategy, "
+        #         f"symbol:-{symbol}, error: {e}")
         # ensure that the thread is deleted
         # to prevent any grid-locks during production.
         del self.async_registry[symbol]
+
+    def close_signal(self, signal: Signal):
+        """ A callback function that will 
+            delete signal from engine state and 
+            update state to database.
+
+            Parameters
+            ----------
+            signal: `Signal`
+                A signal object to delete from state.
+        """
+        logging.info(f"[closing] signal symbol: {signal.symbol} from engine state.")
+        del self.signals[signal.symbol]
+        self.database.update(reference=self.database_ref, data=self.signals)
+        logging.info(f"[update] update-engine-state to "
+            f"database:{self.database_ref}, n-signals: {len(self.signals)}")
+    
+    def distribute_signal(self, signal: Signal):
+        """ Will send new signal to publisher topic & update
+            current engine state to database.
+
+            Parameters
+            ----------
+            signal: `Signal`
+                A signal object publish to topic.
+        """
+        # publish the newly created signal
+        # to dedicated distributed topic
+        self.publisher.publish(
+            origin=self.__class__.__name__,
+            topic_path=self.topic_path,
+            data=signal.to_dict(),
+            attributes=dict(symbol=signal.symbol))
+        logging.info(f"[distribute] signal-distributed to "
+            f"topic:{self.topic_path}, symbol: {signal.symbol}")
+        # set the current engine state to database 
+        self.database.set(reference=self.database_ref, data=self.signals)
+        logging.info(f"[update] update-engine-state to "
+            f"database:{self.database_ref}, n-signals: {len(self.signals)}")
     
     def format_dataframe(self, dataframe: pd.DataFrame) -> pd.DataFrame:
         """ Will format the dataframe to ensure appropriate format for
@@ -235,8 +291,15 @@ class SignalEngine():
                 A dictionary containing signal of the strategy
                 assigned to this engine in dictionary format.
         """
-        logging.info(f"[get] retrieving-signal from signal topic...")
-        return {}
+        _signals = {}
+        logging.info(f"[get] retrieving-signal from signal database.")
+        signals = self.database.get(self.database_ref)
+        if not signals: return _signals
+        for signal in signals:
+            _signal = init_signal_from_rtd(signal)
+            _signals[_signal.symbol] = _signal
+        logging.info(f"[get] retrieved {len(_signals)} from database.")
+        return _signals
 
     def validate_params(self, params: dict) -> dict:
         """ Will return the subscription params if its valid.

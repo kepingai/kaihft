@@ -2,7 +2,7 @@ from typing import Union
 import urllib, requests, json, logging
 import google.auth.transport.requests
 
-__CRED = '~/credentials.json'
+__CRED = 'credentials.json'
 
 def fetch_id_token(audience: str) -> Union[str, None]:
     """ Will return the id token for specific service url. 
@@ -34,14 +34,16 @@ def fetch_id_token(audience: str) -> Union[str, None]:
     credentials.refresh(request)
     return credentials.token
 
-def predict(symbol: str, data: dict) -> Union[dict, None]:
+def predict(base: str, quote: str, data: dict) -> Union[dict, None]:
     """ Forecast the price spread in percentage and direction of
         a generic Coin n ticks to the future and its direction.
 
         Parameters
         ----------
-        symbol: `str`
-            The symbol of the coin.
+        base: `str`
+            The base symbol of the ticker.
+        quote: `str`
+            The quote symbol of the ticker.
         data: `dict`
             A dictionary of klines lists data.
             
@@ -94,7 +96,7 @@ def predict(symbol: str, data: dict) -> Union[dict, None]:
     """
     job_id = "0A"
     base_url = "https://us-central1-keping-ai-continuum.cloudfunctions.net/predict_15m"
-    model_url = f"{base_url}_{symbol.lower()}_{job_id}"
+    model_url = f"{base_url}_{base.lower()}_{quote.lower()}_{job_id}"
     # fetch id token first
     id_token = fetch_id_token(model_url)
     if id_token is None: return None
@@ -102,8 +104,9 @@ def predict(symbol: str, data: dict) -> Union[dict, None]:
     headers = {"Authorization": f'bearer {id_token}', "content-type" : 'application/json'}
     params = dict(instances=dict(data=data))
     result = requests.post(model_url, data=json.dumps(params), headers=headers)
-    if result.status_code == 200:
-        return json.loads(result)
+    if result.status_code == 200 and result.content:
+        logging.info(f"[prediction] output:{result.content}")
+        return json.loads(result.content)
     else: 
         logging.error(f"[predict] failed inferencing to layer 2, "
         f"status-code:{result.status_code}, content:{result.content}")

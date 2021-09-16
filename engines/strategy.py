@@ -1,9 +1,9 @@
 import pandas as pd
+import pandas_ta as ta
 from typing import Union
 from .signal import Signal
 from .predict import predict
 from abc import abstractmethod
-from publishers.client import KaiPublisherClient
 
 class Strategy():
     """ Abstract strategy class. """
@@ -16,17 +16,19 @@ class Strategy():
     def scout(self, dataframe: pd.DataFrame) -> Union[Signal, None]:
         raise NotImplementedError()
     
-    def layer2(self, symbol: str, data: list) :
+    def layer2(self, base: str, quote: str, data: dict) :
         """ Connect to layer 2 and inference to specific model. 
 
             Parameters
             ----------
-            symbol: `str`
-                The ticker symbol.
-            data: `list`
+            base: `str`
+                The base symbol of the ticker.
+            quote: `str`
+                The quote symbol of the ticker.
+            data: `dict`
                 Dictionary containing list of klines.
         """
-        result = predict(symbol=symbol, data=data.to_dict('list'))
+        result = predict(base=base, quote=quote, data=data)
         if not result: return None, None, None, None, None
         pred = result['predictions']
         return (float(pred['percentage_spread']), 
@@ -70,9 +72,12 @@ class SuperTrendSqueeze(Strategy):
                 "length": self.sma, 
                 "prefix": "VOLUME"
             }]
+        self.strategy = ta.Strategy(name=self.name,
+            description=self.description, ta=self.technical_analysis)
     
     def scout(self, 
-              symbol: str, 
+              base: str, 
+              quote: str,
               dataframe: pd.DataFrame, 
               callback: callable) -> Union[Signal, None]:
         """ Will scout for potential market trigger from  
@@ -103,19 +108,28 @@ class SuperTrendSqueeze(Strategy):
         """
         signal = False
         clean_df = dataframe.copy()
+        # format the clean df before inference
+        clean_df.rename(columns=dict(
+            timeframe="interval", symbol="ticker",
+            taker_buy_base_vol="taker_buy_asset_vol"), inplace=True)
+        clean_df = clean_df[['open', 'high', 'low', 'close', 'volume', 'close_time',
+            'quote_asset_volume', 'number_of_trades', 'taker_buy_asset_vol',
+            'taker_buy_quote_vol', 'datetime', 'ticker', 'interval']]
+        # print(clean_df.tail(20))
+        ta_dataframe = dataframe.copy()
         # retrieve the technical indicators
-        dataframe.ta.strategy(self.technical_analysis)
+        ta_dataframe.ta.strategy(self.strategy)
         # run technical analysis for long and short strategy
         # retrieve the necessary indicators
         supertrend = f"SUPERTd_{self.supertrend_len}_{self.supertrend_mul}"
-        direction = dataframe.iloc[-1][supertrend]
-        squeeze = dataframe.iloc[-1].SQZ_OFF
-        last_price = dataframe.iloc[-1].close
+        direction = ta_dataframe.iloc[-1][supertrend]
+        squeeze = ta_dataframe.iloc[-1].SQZ_OFF
+        last_price = ta_dataframe.iloc[-1].close
         # if direction is long and squeeze is off
         if direction == 1 and squeeze == 1:
             # inference to layer 2
             _spread, _direction, _n_tick, base, quote= self.layer2(
-                symbol=symbol, data=clean_df.to_dict('list'))
+                base=base, quote=quote, data=clean_df.to_dict('list'))
             if not _spread or not _direction: return None
             # ensure that spread is above threshold and direction matches.
             if _spread >= self.spread and _direction == 1: signal = True
@@ -123,7 +137,7 @@ class SuperTrendSqueeze(Strategy):
         elif direction == -1 and squeeze == 1:
             # inference to layer 2
             _spread, _direction, _n_tick, base, quote = self.layer2(
-                symbol=symbol, data=clean_df.to_dict('list'))
+                base=base, quote=quote, data=clean_df.to_dict('list'))
             if not _spread or not _direction: return None
             # ensure that spread is above threshold and direction matches.
             if _spread >= self.spread and _direction == 0: signal = True
@@ -131,10 +145,11 @@ class SuperTrendSqueeze(Strategy):
             base=base,
             quote=quote,
             spread=_spread,
+            purchase_price=last_price,
             last_price=last_price,
             direction=_direction,
-            n_tick_forward=_n_tick,
-            callback=callback) if signal else None
+            callback=callback,
+            n_tick_forward=_n_tick) if signal else None
 
 __REGISTRY = {
     "STS": SuperTrendSqueeze
@@ -154,4 +169,5 @@ def get_strategy(id: str) -> Union[Strategy, None]:
             A strategy that inherits `Strategy` class.
     """
     if id in __REGISTRY: return __REGISTRY[id]
-    else: raise KeyError(f"Strategy {id} not found, only: {__REGISTRY.keys()} available!")
+    else: raise KeyError(f"Strategy {id} not found, only: "
+        f"{__REGISTRY.keys()} available!")
