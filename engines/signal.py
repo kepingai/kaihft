@@ -76,7 +76,11 @@ class Signal():
                 Will return the update status of the signal.
         """
         # if last price have gone above the exit price
-        if last_price >= self.exit_price:
+        if self.direction == 1 and last_price >= self.exit_price:
+            self._status = SignalStatus.COMPLETED
+            self.callback(self)
+        # if last price have gone above the exit price
+        if self.direction == 0 and last_price <= self.exit_price:
             self._status = SignalStatus.COMPLETED
             self.callback(self)
         # check if time has surpassed expected expired date

@@ -327,10 +327,6 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
                         base=base,
                         quote=quote,
                         symbol=symbol))
-                _klines = pd.DataFrame(klines)
-                _klines['datetime'] = _klines.close_time.apply(
-                    lambda x: str(pd.to_datetime(datetime.utcfromtimestamp(
-                        (x / 1000)).strftime('%c'))))
             count += 1
             if count % self.log_every == 0:
                 logging.info(self.websocket.print_summary(disable_print=True))

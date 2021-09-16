@@ -61,8 +61,6 @@ class SignalEngine():
         self.subscriber = subscriber
         self.subscriptions_params = self.validate_params(subscriptions_params)
         self.strategy = self._get_strategy(strategy)
-        # initialize running async threads registry
-        self.async_registry = {}
     
     def run(self):
         """ Will run signal engine concurrent threads asynchronously. """
@@ -108,8 +106,8 @@ class SignalEngine():
                     .decode('utf-8'))['data']['last_price']
                 # update signal with the lastest price
                 self.signals[symbol].update(last_price=last_price)
-            # acknowledge the message only if
-            message.ack()
+        # acknowledge the message only if
+        message.ack()
 
     def scout_signals(self, message: pubsub_v1.subscriber.message.Message):
         """ Will run the strategy from given klines data. 
@@ -124,22 +122,21 @@ class SignalEngine():
             base = message.attributes.get('base')
             quote = message.attributes.get('quote')
             symbol = message.attributes.get("symbol")
-            if symbol not in self.signals and symbol not in self.async_registry:
+            thread_name = f"[thread]-{symbol}"
+            threads = [thread.name for thread in threading.enumerate()]
+            if symbol not in self.signals and symbol not in threads:
                 # run a separate thread to run startegy
                 klines = json.loads(message.data.decode('utf-8'))['data']
                 scout_thread = threading.Thread(
                     target=self.run_strategy,
                     args=(base, quote, symbol, klines),
-                    name=f'[scout] potential-signal-run: symbol: {symbol}')
-                # add the current symbol in registry
-                self.async_registry[symbol] = scout_thread
+                    name=thread_name)
                 # start the scouting thread
                 scout_thread.start()
-                # acknowledge the message
-                message.ack()
-            # else: print(f"not running scout, symbol: {symbol}, signals: {self.signals.keys()}, registry_keys: {self.async_registry.keys()}")
-        else: print(f"message no-attributes: {message}, registry_keys: {self.async_registry.keys()}")
-                
+            else: print(f"not running scout, symbol: {symbol}, signals: {self.signals.keys()}")
+        # acknowledge the message
+        message.ack()
+
     def run_strategy(self, 
                      base: str, 
                      quote: str, 
@@ -198,9 +195,6 @@ class SignalEngine():
         # except Exception as e:
         #     logging.error(f"[strategy] Exception caught running-strategy, "
         #         f"symbol:-{symbol}, error: {e}")
-        # ensure that the thread is deleted
-        # to prevent any grid-locks during production.
-        del self.async_registry[symbol]
 
     def close_signal(self, signal: Signal):
         """ A callback function that will 
@@ -213,8 +207,13 @@ class SignalEngine():
                 A signal object to delete from state.
         """
         logging.info(f"[closing] signal symbol: {signal.symbol} from engine state.")
+        # distribute the completed / expired signal to topic
+        self.distribute_signal(signal)
+        # delete the signal from signals dictionary
         del self.signals[signal.symbol]
-        self.database.update(reference=self.database_ref, data=self.signals)
+        logging.info(f"current active signals: {self.signals.keys()}")
+        # update the real-time database with newly updated dictionary
+        self.database.set(reference=self.database_ref, data=self.signals)
         logging.info(f"[update] update-engine-state to "
             f"database:{self.database_ref}, n-signals: {len(self.signals)}")
     

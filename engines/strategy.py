@@ -48,7 +48,7 @@ class SuperTrendSqueeze(Strategy):
         super().__init__(
             name="SUPERTREND_SQUEEZE", 
             description="SuperTrend x Squeeze Long vs. Short strategy.",
-            spread=0.75)
+            spread=0.4)
         # in this class we will be using
         # lazybear's momentum squeeze, ema 99
         # supertrend and sma for technical analysis
@@ -153,8 +153,6 @@ class SuperTrendSqueeze(Strategy):
             print(f"run {base}{quote} signal: {signal}, direction: {direction}/{_direction}, squeeze: {squeeze}, spread: {self.spread}/{_spread}")
         else:
             print(f"{base}{quote}-no trigger layer 1")
-        if signal:
-           logging.info(f"symbol: {base}{quote}, spread: {type(_spread)}, dir: {type(_direction)}, ticks: {type(_n_tick)}") 
         return Signal(
             base=base,
             quote=quote,
