@@ -1,6 +1,8 @@
 from functools import wraps
 import click, services, logging, os
+from databases.database import KaiRealtimeDatabase
 from publishers.client import KaiPublisherClient
+from subscribers.client import KaiSubscriberClient
 
 # logging verbose mode
 log_filename = 'logs/' + os.path.basename(__file__) + '.log'
@@ -12,6 +14,9 @@ logging.basicConfig(level=logging.INFO,
 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'credentials.json'
 # initialize publisher
 __PUBLISHER = KaiPublisherClient()
+__SUBSCRIBER = KaiSubscriberClient()
+# initiate access to database
+__DATABASE = KaiRealtimeDatabase()
 __MARKETS = {'btcusdt','ethusdt', 'adausdt', 'dogeusdt', 'dotusdt', 'uniusdt'}
 
 def notify_failure(fn: callable):
@@ -60,6 +65,9 @@ def klines_binance_spot(klines, production):
 def signal_binance_spot(strategy, version, production):
     services.signal_engine.main(
         exchange='binance',
+        database=__DATABASE,
+        publisher=__PUBLISHER,
+        subscriber=__SUBSCRIBER,
         strategy=strategy,
         production=production,
         version=version)

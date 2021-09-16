@@ -134,9 +134,7 @@ class SuperTrendSqueeze(Strategy):
             # inference to layer 2
             _spread, _direction, _n_tick, base, quote = self.layer2(
                 base=base, quote=quote, data=clean_df.to_dict('list'))
-            if _spread is None or _direction is None: 
-                logging.warn(f"[layer 2] receiving Nones prediction symbol: {base}{quote}, {_spread}, {_direction}")
-                return None
+            if _spread is None or _direction is None: return None
             # ensure that spread is above threshold and direction matches.
             if _spread >= self.spread and _direction == 1: signal = True
             print(f"run {base}{quote} signal: {signal}, direction: {direction}/{_direction}, squeeze: {squeeze}, spread: {self.spread}/{_spread}")
@@ -145,9 +143,7 @@ class SuperTrendSqueeze(Strategy):
             # inference to layer 2
             _spread, _direction, _n_tick, base, quote = self.layer2(
                 base=base, quote=quote, data=clean_df.to_dict('list'))
-            if _spread is None or _direction is None: 
-                logging.warn(f"[layer 2] receiving Nones prediction symbol: {base}{quote}, {_spread}, {_direction}")
-                return None
+            if _spread is None or _direction is None: return None
             # ensure that spread is above threshold and direction matches.
             if _spread >= self.spread and _direction == 0: signal = True
             print(f"run {base}{quote} signal: {signal}, direction: {direction}/{_direction}, squeeze: {squeeze}, spread: {self.spread}/{_spread}")

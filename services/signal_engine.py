@@ -5,6 +5,9 @@ from subscribers.client import KaiSubscriberClient
 from engines import SignalEngine
 
 def main(exchange: str,
+         database: KaiRealtimeDatabase,
+         publisher: KaiPublisherClient,
+         subscriber: KaiSubscriberClient,
          strategy: str,
          production: bool,
          timeout: int = None,
@@ -41,12 +44,13 @@ def main(exchange: str,
         "ticker": dict(id=ticker_topic_path, timeout=timeout),
         "klines": dict(id=klines_topic_path, timeout=timeout)
     }
+    # initialize engine and start running!
     signal_engine = SignalEngine(
-        database=KaiRealtimeDatabase(),
+        database=database,
         database_ref='signals',
         topic_path=dist_topic_path,
-        publisher=KaiPublisherClient(),
-        subscriber=KaiSubscriberClient(),
+        publisher=publisher,
+        subscriber=subscriber,
         subscriptions_params=params,
         strategy=strategy)
     signal_engine.run()

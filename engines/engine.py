@@ -69,7 +69,7 @@ class SignalEngine():
         self.signals = self.get_signals()
         # log the signals that is currently running in pub/sub
         for symbol, signal in self.signals.items():
-            logging.info(f"*running-signal* - symbol: {symbol}, signal: {signal.to_dict()}")
+            logging.info(f"*running-signal* - symbol: {symbol}, symbol: {signal.symbol}, direction: {signal.direction}, spread: {signal.spread}")
         # run engine concurrently in separate threads
         # create separate thread to update signals
         # with the most recent ticker data from subscriber.
@@ -122,9 +122,10 @@ class SignalEngine():
             base = message.attributes.get('base')
             quote = message.attributes.get('quote')
             symbol = message.attributes.get("symbol")
-            thread_name = f"[thread]-{symbol}"
-            threads = [thread.name for thread in threading.enumerate()]
-            if symbol not in self.signals and symbol not in threads:
+            tag = "[thread]"
+            thread_name = f"{tag}-{symbol}"
+            threads = [thread.name for thread in threading.enumerate() if thread.name.startswith(tag)]
+            if symbol not in self.signals and thread_name not in threads:
                 # run a separate thread to run startegy
                 klines = json.loads(message.data.decode('utf-8'))['data']
                 scout_thread = threading.Thread(
@@ -133,7 +134,9 @@ class SignalEngine():
                     name=thread_name)
                 # start the scouting thread
                 scout_thread.start()
-            else: print(f"not running scout, symbol: {symbol}, signals: {self.signals.keys()}")
+                scout_thread.join()
+            # else: 
+            #     print(f"not running scout, symbol: {symbol}, signals: {self.signals.keys()}, threads: {threads}")
         # acknowledge the message
         message.ack()
 
@@ -228,6 +231,7 @@ class SignalEngine():
         """
         logging.info(f"[distribute] signal-distributing to "
             f"topic:{self.topic_path}, symbol: {signal.symbol}")
+        logging.info(f"current active signals: {self.signals.keys()}")
         # publish the newly created signal
         # to dedicated distributed topic
         self.publisher.publish(
