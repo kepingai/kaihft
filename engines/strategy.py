@@ -1,18 +1,28 @@
-import logging
+import time, logging
 import pandas as pd
 import numexpr as ne
 import pandas_ta as ta
 from typing import Union
 from .signal import Signal
 from .predict import predict
+from datetime import datetime
 from abc import abstractmethod
 
 class Strategy():
     """ Abstract strategy class. """
-    def __init__(self, name: str, description: str, spread: float):
+    def __init__(self, 
+                 name: str, 
+                 description: str, 
+                 spread: float,
+                 log_metrics_every: int):
         self.name = name
         self.description = description
         self.spread = spread
+        self.log_metrics_every = log_metrics_every
+        # initialize multi-core threads
+        ne.set_vml_num_threads(8)
+        # initialize running metrics
+        self.metrics = {}
 
     @abstractmethod
     def scout(self, dataframe: pd.DataFrame) -> Union[Signal, None]:
@@ -38,6 +48,45 @@ class Strategy():
             int(pred['n_tick_forward']),
             str(result['base']), 
             str(result['quote']))
+    
+    def save_metrics(self, start: float, end: float, symbol: str):
+        """ Will save metrics of running specific symbol.
+
+            Parameters
+            ----------
+            start: `str`
+                The starting time of analysis in floating seconds.
+            end: `str`
+                The ending time of analysis in floating seconds.
+            symbol: `str`
+                The ticker symbol.
+        """
+        execution_time = round(end - start, 2)
+        utctime = str(datetime.utcnow())
+        if symbol not in self.metrics:
+            self.metrics[symbol] = dict(
+                last_execution_time=execution_time,
+                last_utc_timestamp=utctime,
+                count=1,
+                average_execution_time=execution_time,
+                total_execution_time=execution_time)
+        else:
+            count = self.metrics[symbol]['count'] + 1
+            total_execution_time = self.metrics[symbol]['total_execution_time'] + execution_time
+            self.metrics[symbol].update(
+                dict(
+                    last_execution_time=execution_time,
+                    last_utc_timestamp=utctime,
+                    count=count,
+                    average_execution_time=round(total_execution_time/count, 2),
+                    total_execution_time=round(total_execution_time, 2)
+                )
+            )
+        if self.metrics[symbol]['count'] % self.log_metrics_every == 0:
+            metrics = ", ".join([f"{key} : {value}" 
+                for key, value in self.metrics[symbol].items()])
+            logging.info(f"[metrics] strategy-{self.name}, symbol: {symbol}, "
+                f"metrics: {metrics}")
 
 class SuperTrendSqueeze(Strategy):
     def __init__(self):
@@ -48,7 +97,8 @@ class SuperTrendSqueeze(Strategy):
         super().__init__(
             name="SUPERTREND_SQUEEZE", 
             description="SuperTrend x Squeeze Long vs. Short strategy.",
-            spread=0.4)
+            spread=0.4,
+            log_metrics_every=20)
         # in this class we will be using
         # lazybear's momentum squeeze, ema 99
         # supertrend and sma for technical analysis
@@ -76,8 +126,6 @@ class SuperTrendSqueeze(Strategy):
             }]
         self.strategy = ta.Strategy(name=self.name,
             description=self.description, ta=self.technical_analysis)
-        # initialize multi-core threads
-        ne.set_vml_num_threads(8)
     
     def scout(self, 
               base: str, 
@@ -110,6 +158,7 @@ class SuperTrendSqueeze(Strategy):
             `Union[Signal, None]`
                 Will return a Signal object or None.
         """
+        start = time.time()
         signal = False
         clean_df = dataframe.copy()
         # format the clean df before inference
@@ -137,7 +186,6 @@ class SuperTrendSqueeze(Strategy):
             if _spread is None or _direction is None: return None
             # ensure that spread is above threshold and direction matches.
             if _spread >= self.spread and _direction == 1: signal = True
-            print(f"run {base}{quote} signal: {signal}, direction: {direction}/{_direction}, squeeze: {squeeze}, spread: {self.spread}/{_spread}")
         # else if direction is short and squeeze is off
         elif direction == -1 and squeeze == 1:
             # inference to layer 2
@@ -146,9 +194,10 @@ class SuperTrendSqueeze(Strategy):
             if _spread is None or _direction is None: return None
             # ensure that spread is above threshold and direction matches.
             if _spread >= self.spread and _direction == 0: signal = True
-            print(f"run {base}{quote} signal: {signal}, direction: {direction}/{_direction}, squeeze: {squeeze}, spread: {self.spread}/{_spread}")
-        else:
-            print(f"{base}{quote}-no trigger layer 1")
+        # record the ending time of analysis
+        end = time.time()
+        self.save_metrics(start, end, f"{base}{quote}")
+        # return the appropriate result
         return Signal(
             base=base,
             quote=quote,

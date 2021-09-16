@@ -213,7 +213,7 @@ class SignalEngine():
         # distribute the completed / expired signal to topic
         self.distribute_signal(signal)
         # delete the signal from signals dictionary
-        del self.signals[signal.symbol]
+        if signal.symbol in self.signals: del self.signals[signal.symbol]
         logging.info(f"current active signals: {self.signals.keys()}")
         # update the real-time database with newly updated dictionary
         self.database.set(reference=self.database_ref, data=self.signals)

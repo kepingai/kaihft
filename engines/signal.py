@@ -30,7 +30,7 @@ class Signal():
         self.id = id
         self.base = base
         self.quote = quote
-        self.symbol = f"{base.upper()}{quote.upper()}"
+        self.symbol = f"{base}{quote}".upper()
         self.spread = spread
         self.purchase_price = purchase_price
         mult = (1 + (spread / 100)) if direction == 1 else (1 - (spread / 100))
