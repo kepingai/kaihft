@@ -238,7 +238,11 @@ class SignalEngine():
             origin=self.__class__.__name__,
             topic_path=self.topic_path,
             data=signal.to_dict(),
-            attributes=dict(symbol=signal.symbol))
+            attributes=dict(
+                symbol=signal.symbol,
+                base=signal.base,
+                quote=signal.quote,
+                status=str(signal.status)))
         logging.info(f"[distribute] signal-distributed to "
             f"topic:{self.topic_path}, symbol: {signal.symbol}")
         # set the current engine state to database 

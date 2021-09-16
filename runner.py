@@ -7,7 +7,6 @@ from subscribers.client import KaiSubscriberClient
 # logging verbose mode
 log_filename = 'logs/' + os.path.basename(__file__) + '.log'
 logging.basicConfig(level=logging.INFO,       
-                    filename=log_filename,       
                     format="{asctime} [{levelname:8}] {process} {thread} {module}: {message}",       
                     style="{")
 # set environment credentials
