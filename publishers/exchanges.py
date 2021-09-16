@@ -331,8 +331,6 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
                 _klines['datetime'] = _klines.close_time.apply(
                     lambda x: str(pd.to_datetime(datetime.utcfromtimestamp(
                         (x / 1000)).strftime('%c'))))
-                if count % 100 == 0:
-                    print(_klines[['datetime', 'symbol', 'open', 'high', 'low', 'close', 'volume']].tail(5))
             count += 1
             if count % self.log_every == 0:
                 logging.info(self.websocket.print_summary(disable_print=True))
@@ -377,7 +375,6 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
         # of the specific symbol and status
         status = self.kline_status[symbol]
         if status == KlineStatus.CLOSED:
-            print('closed', symbol)
             # append the klines dataframe with new kline
             # remove the first row of the kline for memory
             self.markets_klines[symbol] = self.markets_klines[symbol].append(data, ignore_index=True)

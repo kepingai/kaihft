@@ -28,14 +28,14 @@ def main(exchange: str,
     if production:
         ticker_topic_path = f'prod-ticker-{exchange}-{version}-sub'
         klines_topic_path = f'prod-klines-{exchange}-{version}-sub'
-        dist_topic_path = f'prod-distribution-signal-{exchange}-{version}-sub'
+        dist_topic_path = f'prod-distribute-signal-{exchange}-{version}'
         logging.warn(f"[production-mode] strategy: BINANCE-SPOT-{strategy}"
             f"paths=ticker: {ticker_topic_path}, klines: {klines_topic_path},"
-            f"distribution: {dist_topic_path}")
+            f"distribute: {dist_topic_path}")
     else: 
         ticker_topic_path = f'dev-ticker-{exchange}-{version}-sub'
         klines_topic_path = f'dev-klines-{exchange}-{version}-sub'
-        dist_topic_path = f'dev-distribution-signal-{exchange}-{version}-sub'
+        dist_topic_path = f'dev-distribute-signal-{exchange}-{version}'
     # initialize signal engine class and run it
     params = {
         "ticker": dict(id=ticker_topic_path, timeout=timeout),

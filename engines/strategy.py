@@ -1,4 +1,6 @@
+import logging
 import pandas as pd
+import numexpr as ne
 import pandas_ta as ta
 from typing import Union
 from .signal import Signal
@@ -29,7 +31,7 @@ class Strategy():
                 Dictionary containing list of klines.
         """
         result = predict(base=base, quote=quote, data=data)
-        if not result: return None, None, None, None, None
+        if not result: return None, None, None, base, quote
         pred = result['predictions']
         return (float(pred['percentage_spread']), 
             int(pred['direction']), 
@@ -74,6 +76,8 @@ class SuperTrendSqueeze(Strategy):
             }]
         self.strategy = ta.Strategy(name=self.name,
             description=self.description, ta=self.technical_analysis)
+        # initialize multi-core threads
+        ne.set_vml_num_threads(8)
     
     def scout(self, 
               base: str, 
@@ -128,25 +132,35 @@ class SuperTrendSqueeze(Strategy):
         # if direction is long and squeeze is off
         if direction == 1 and squeeze == 1:
             # inference to layer 2
-            _spread, _direction, _n_tick, base, quote= self.layer2(
+            _spread, _direction, _n_tick, base, quote = self.layer2(
                 base=base, quote=quote, data=clean_df.to_dict('list'))
-            if not _spread or not _direction: return None
+            if _spread is None or _direction is None: 
+                logging.warn(f"[layer 2] receiving Nones prediction symbol: {base}{quote}, {_spread}, {_direction}")
+                return None
             # ensure that spread is above threshold and direction matches.
             if _spread >= self.spread and _direction == 1: signal = True
+            print(f"run {base}{quote} signal: {signal}, direction: {direction}/{_direction}, squeeze: {squeeze}, spread: {self.spread}/{_spread}")
         # else if direction is short and squeeze is off
         elif direction == -1 and squeeze == 1:
             # inference to layer 2
             _spread, _direction, _n_tick, base, quote = self.layer2(
                 base=base, quote=quote, data=clean_df.to_dict('list'))
-            if not _spread or not _direction: return None
+            if _spread is None or _direction is None: 
+                logging.warn(f"[layer 2] receiving Nones prediction symbol: {base}{quote}, {_spread}, {_direction}")
+                return None
             # ensure that spread is above threshold and direction matches.
             if _spread >= self.spread and _direction == 0: signal = True
+            print(f"run {base}{quote} signal: {signal}, direction: {direction}/{_direction}, squeeze: {squeeze}, spread: {self.spread}/{_spread}")
+        else:
+            print(f"{base}{quote}-no trigger layer 1")
+        if signal:
+           logging.info(f"symbol: {base}{quote}, spread: {type(_spread)}, dir: {type(_direction)}, ticks: {type(_n_tick)}") 
         return Signal(
             base=base,
             quote=quote,
             spread=_spread,
-            purchase_price=last_price,
-            last_price=last_price,
+            purchase_price=float(last_price),
+            last_price=float(last_price),
             direction=_direction,
             callback=callback,
             n_tick_forward=_n_tick) if signal else None

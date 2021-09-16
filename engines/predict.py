@@ -1,5 +1,5 @@
 from typing import Union
-import urllib, requests, json, logging
+import requests, json, logging
 import google.auth.transport.requests
 
 __CRED = 'credentials.json'
@@ -105,9 +105,8 @@ def predict(base: str, quote: str, data: dict) -> Union[dict, None]:
     params = dict(instances=dict(data=data))
     result = requests.post(model_url, data=json.dumps(params), headers=headers)
     if result.status_code == 200 and result.content:
-        logging.info(f"[prediction] output:{result.content}")
         return json.loads(result.content)
     else: 
-        logging.error(f"[predict] failed inferencing to layer 2, "
-        f"status-code:{result.status_code}, content:{result.content}")
+        logging.warn(f"[predict] failed inferencing to layer 2, "
+        f"status-code:{result.status_code}, symbol: {base}{quote}")
         return None

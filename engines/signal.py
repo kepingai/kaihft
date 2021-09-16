@@ -1,4 +1,4 @@
-import uuid
+import uuid, logging
 from datetime import datetime, timedelta
 from enum import Enum
 
@@ -23,9 +23,9 @@ class Signal():
                  n_tick_forward: int,
                  buffer: int = 3,
                  realized_profit : float = 0.0,
-                 id: str = uuid.uuid4(),
-                 created_at: datetime = datetime.utcnow(),
-                 expired_at: datetime = None,
+                 id: str = str(uuid.uuid4()),
+                 created_at: int = datetime.utcnow().timestamp(),
+                 expired_at: int = None,
                  status: SignalStatus = SignalStatus.NEW):
         self.id = id
         self.base = base
@@ -33,7 +33,8 @@ class Signal():
         self.symbol = f"{base.upper()}{quote.upper()}"
         self.spread = spread
         self.purchase_price = purchase_price
-        self.exit_price = purchase_price * (1 + spread)
+        mult = (1 + (spread / 100)) if direction == 1 else (1 - (spread / 100))
+        self.exit_price = purchase_price * mult
         self.last_price = last_price
         self.direction = direction
         self.n_tick_forward = n_tick_forward
@@ -42,9 +43,10 @@ class Signal():
         self.buffer = buffer
         self.realized_profit = realized_profit
         self.created_at = created_at
-        self.expired_at = (self.created_at + timedelta(
-            minutes=(15 * (n_tick_forward + buffer))) 
+        self.expired_at = ((datetime.utcfromtimestamp(self.created_at) + timedelta(
+            minutes=(15 * (n_tick_forward + buffer)))).timestamp()
             if not expired_at else expired_at)
+        logging.info(f"[signal] created! {self.to_dict()}")
     
     @property
     def status(self) -> SignalStatus:
@@ -78,7 +80,7 @@ class Signal():
             self._status = SignalStatus.COMPLETED
             self.callback(self)
         # check if time has surpassed expected expired date
-        if datetime.utcnow() >= self.expired_at:
+        if datetime.utcnow().timestamp() >= self.expired_at:
             self._status = SignalStatus.EXPIRED
             self.callback(self) 
         return self._status
@@ -100,15 +102,14 @@ class Signal():
             last_price=self.last_price,
             direction=self.direction,
             n_tick_forward=self.n_tick_forward,
-            callback=str(self.callback),
             status=str(self._status),
             buffer=self.buffer,
             realized_profit=self.realized_profit,
-            created_at=str(self.created_at),
-            expired_at=str(self.expired_at)
+            created_at=self.created_at,
+            expired_at=self.expired_at
         )
 
-def init_signal_from_rtd(data: dict) -> Signal:
+def init_signal_from_rtd(data: dict, callback: callable) -> Signal:
     """ Will initialize a Signal class object
         from real-time database.
 
@@ -116,6 +117,8 @@ def init_signal_from_rtd(data: dict) -> Signal:
         ----------
         data: `dict`
             The data to be converted to Signal instance.
+        callback: `callable`
+            A callback for updating the signal.
         
         Returns
         -------
@@ -129,8 +132,8 @@ def init_signal_from_rtd(data: dict) -> Signal:
         purchase_price=data['purchase_price'],
         last_price=data['last_price'],
         direction=data['direction'],
-        callback=data['callback'],
-        n_tick_forward=data['n_tick'],
+        callback=callback,
+        n_tick_forward=data['n_tick_forward'],
         created_at=data['created_at'],
         buffer=data['buffer'],
         realized_profit=data['realized_profit'],

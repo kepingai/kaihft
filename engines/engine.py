@@ -31,7 +31,7 @@ class SignalEngine():
             database_ref: `str`
                 A string of database reference path.
             topic_path: `str`
-                Is the distribution-signal topic path for new signals.
+                Is the distribute-signal topic path for new signals.
             subscriber: `KaiSubscriberClient`
                 The subscriber client.
             subscriptions_params: `dict`
@@ -73,25 +73,23 @@ class SignalEngine():
         for symbol, signal in self.signals.items():
             logging.info(f"*running-signal* - symbol: {symbol}, signal: {signal.to_dict()}")
         # run engine concurrently in separate threads
-        try:
-            # create separate thread to update signals
-             # with the most recent ticker data from subscriber.
-            ticker_thread = threading.Thread(
+        # create separate thread to update signals
+        # with the most recent ticker data from subscriber.
+        ticker_thread = threading.Thread(
                 target=self.subscribe,
                 args=('ticker', self.update_signals), 
                 name=f"thread-ticker-subscription")
-            # create separate thread to subscribe with the latest
-            # klines from subscription client. Use the klines data 
-            # to run strategy and inference to layer 2.
-            klines_thread = threading.Thread(
+        # create separate thread to subscribe with the latest
+        # klines from subscription client. Use the klines data 
+        # to run strategy and inference to layer 2.
+        klines_thread = threading.Thread(
                 target=self.subscribe,
                 args=('klines', self.scout_signals), 
                 name=f"thread-klines-subscription")
-            # run the threads together
-            ticker_thread.start()
-            klines_thread.start()
-        finally:
-            logging.info(f"[synced] ticker-klines signal engine synced! - strategy: {self.strategy}, subscriber: {self.subscriber}")
+        # run the threads together
+        ticker_thread.start()
+        klines_thread.start()
+        logging.info(f"[synced] ticker-klines signal engine synced! - strategy: {self.strategy}, subscriber: {self.subscriber}")
             
     def update_signals(self, message: pubsub_v1.subscriber.message.Message):
         """ Update signals with the most recent data. 
@@ -109,7 +107,7 @@ class SignalEngine():
                 last_price = json.loads(message.data
                     .decode('utf-8'))['data']['last_price']
                 # update signal with the lastest price
-                self.signals['symbol'].update(last_price=last_price)
+                self.signals[symbol].update(last_price=last_price)
             # acknowledge the message only if
             message.ack()
 
@@ -139,6 +137,8 @@ class SignalEngine():
                 scout_thread.start()
                 # acknowledge the message
                 message.ack()
+            # else: print(f"not running scout, symbol: {symbol}, signals: {self.signals.keys()}, registry_keys: {self.async_registry.keys()}")
+        else: print(f"message no-attributes: {message}, registry_keys: {self.async_registry.keys()}")
                 
     def run_strategy(self, 
                      base: str, 
@@ -227,6 +227,8 @@ class SignalEngine():
             signal: `Signal`
                 A signal object publish to topic.
         """
+        logging.info(f"[distribute] signal-distributing to "
+            f"topic:{self.topic_path}, symbol: {signal.symbol}")
         # publish the newly created signal
         # to dedicated distributed topic
         self.publisher.publish(
@@ -295,8 +297,8 @@ class SignalEngine():
         logging.info(f"[get] retrieving-signal from signal database.")
         signals = self.database.get(self.database_ref)
         if not signals: return _signals
-        for signal in signals:
-            _signal = init_signal_from_rtd(signal)
+        for _, signal in signals.items():
+            _signal = init_signal_from_rtd(signal, self.close_signal)
             _signals[_signal.symbol] = _signal
         logging.info(f"[get] retrieved {len(_signals)} from database.")
         return _signals
