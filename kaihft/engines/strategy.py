@@ -102,9 +102,9 @@ class SuperTrendSqueeze(Strategy):
         super().__init__(
             name="SUPERTREND_SQUEEZE", 
             description="SuperTrend x Squeeze Long vs. Short strategy.",
-            long_spread=1.0,
-            long_ttp=0.4,
-            short_spread=1.0,
+            long_spread=1.1,
+            long_ttp=0.6,
+            short_spread=0.8,
             short_ttp=0.4,
             log_metrics_every=20)
         # in this class we will be using
