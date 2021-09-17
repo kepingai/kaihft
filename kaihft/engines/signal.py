@@ -83,12 +83,14 @@ class Signal():
         self.last_price = last_price
         # if last price have gone above the exit price
         if self.direction == 1 and last_price >= self.exit_price:
-            self.realized_profit = self.take_profit
+            self.realized_profit = round(abs(self.last_price - 
+                self.purchase_price) / self.purchase_price * 100, 4)
             self._status = SignalStatus.COMPLETED
             self.callback(self)
         # if last price have gone above the exit price
         elif self.direction == 0 and last_price <= self.exit_price:
-            self.realized_profit = self.take_profit
+            self.realized_profit = round(abs(self.last_price - 
+                self.purchase_price) / self.purchase_price * 100, 4)
             self._status = SignalStatus.COMPLETED
             self.callback(self)
         # check if time has surpassed expected expired date
