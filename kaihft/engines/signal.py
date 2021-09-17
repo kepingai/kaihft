@@ -43,7 +43,7 @@ class Signal():
         self.buffer = buffer
         self.realized_profit = realized_profit
         self.created_at = created_at
-        self.expired_at = ((datetime.utcfromtimestamp(self.created_at) + timedelta(
+        self.expired_at = ((datetime.fromtimestamp(self.created_at) + timedelta(
             minutes=(15 * (n_tick_forward + buffer)))).timestamp()
             if not expired_at else expired_at)
         logging.info(f"[signal] created! symbol:{self.symbol}, "

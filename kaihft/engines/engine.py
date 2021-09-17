@@ -267,7 +267,7 @@ class SignalEngine():
         ohlcv = ['open', 'high', 'close', 'low', 'volume']
         # convert the close time to utc string datetime
         dataframe['datetime'] = dataframe.close_time.apply(
-            lambda x: str(pd.to_datetime(datetime.utcfromtimestamp(
+            lambda x: str(pd.to_datetime(datetime.fromtimestamp(
                 (x / 1000)).strftime('%c'))))
         dataframe[ohlcv] = dataframe[ohlcv].astype('float32')
         return dataframe
