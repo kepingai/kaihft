@@ -194,6 +194,8 @@ class SuperTrendSqueeze(Strategy):
             if _spread is None or _direction is None: return None
             # ensure that spread is above threshold and direction matches.
             if _spread >= self.spread and _direction == 0: signal = True
+        # if there's no signal generated return None
+        if not signal: return None
         # record the ending time of analysis
         end = time.time()
         self.save_metrics(start, end, f"{base}{quote}")
@@ -206,7 +208,7 @@ class SuperTrendSqueeze(Strategy):
             last_price=float(last_price),
             direction=_direction,
             callback=callback,
-            n_tick_forward=_n_tick) if signal else None
+            n_tick_forward=_n_tick)
 
 __REGISTRY = {
     "STS": SuperTrendSqueeze

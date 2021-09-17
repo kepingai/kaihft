@@ -76,6 +76,7 @@ class Signal():
             `SignalStatus`
                 Will return the update status of the signal.
         """
+        self.last_price = last_price
         # if last price have gone above the exit price
         if self.direction == 1 and last_price >= self.exit_price:
             self._status = SignalStatus.COMPLETED

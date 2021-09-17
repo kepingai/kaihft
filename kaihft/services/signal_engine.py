@@ -1,8 +1,8 @@
 import logging
-from databases import KaiRealtimeDatabase
-from publishers.client import KaiPublisherClient
-from subscribers.client import KaiSubscriberClient
-from engines import SignalEngine
+from kaihft.databases import KaiRealtimeDatabase
+from kaihft.publishers.client import KaiPublisherClient
+from kaihft.subscribers.client import KaiSubscriberClient
+from kaihft.engines import SignalEngine
 
 def main(exchange: str,
          database: KaiRealtimeDatabase,

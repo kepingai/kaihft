@@ -2,9 +2,9 @@ import pandas as pd
 import logging, json, threading
 from datetime import datetime
 from google.cloud import pubsub_v1
-from databases import KaiRealtimeDatabase
-from publishers.client import KaiPublisherClient
-from subscribers.client import KaiSubscriberClient
+from kaihft.databases import KaiRealtimeDatabase
+from kaihft.publishers.client import KaiPublisherClient
+from kaihft.subscribers.client import KaiSubscriberClient
 from .strategy import get_strategy, Strategy
 from .signal import init_signal_from_rtd, Signal
 

@@ -1,6 +1,6 @@
 import logging
-from publishers.exchanges import BinanceKlinesPublisher
-from publishers.client import KaiPublisherClient
+from kaihft.publishers.exchanges import BinanceKlinesPublisher
+from kaihft.publishers.client import KaiPublisherClient
 from binance.client import Client
 from unicorn_binance_websocket_api.unicorn_binance_websocket_api_manager import BinanceWebSocketApiManager
 

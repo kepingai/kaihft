@@ -1,6 +1,6 @@
 import logging
-from publishers.exchanges import BinanceTickerPublisher
-from publishers.client import KaiPublisherClient
+from kaihft.publishers.exchanges import BinanceTickerPublisher
+from kaihft.publishers.client import KaiPublisherClient
 from unicorn_binance_websocket_api.unicorn_binance_websocket_api_manager import BinanceWebSocketApiManager
 
 def main(

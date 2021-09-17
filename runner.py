@@ -1,8 +1,9 @@
 from functools import wraps
-import click, services, logging, os
-from databases.database import KaiRealtimeDatabase
-from publishers.client import KaiPublisherClient
-from subscribers.client import KaiSubscriberClient
+import click, logging, os
+import kaihft.services as services
+from kaihft.databases.database import KaiRealtimeDatabase
+from kaihft.publishers.client import KaiPublisherClient
+from kaihft.subscribers.client import KaiSubscriberClient
 
 # logging verbose mode
 log_filename = 'logs/' + os.path.basename(__file__) + '.log'
