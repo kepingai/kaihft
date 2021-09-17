@@ -6,3 +6,7 @@ test*
 *.log
 # credential files
 *credential*
+# build and wheel
+build
+dist
+*egg-info
