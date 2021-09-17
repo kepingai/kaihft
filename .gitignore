@@ -10,3 +10,4 @@ test*
 build
 dist
 *egg-info
+setup.py

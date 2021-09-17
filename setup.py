@@ -4,6 +4,7 @@ setuptools.setup(
     name="kaihft",
     packages=[
         "kaihft",
+        "kaihft.alerts",
         "kaihft.databases",
         "kaihft.engines",
         "kaihft.publishers",
