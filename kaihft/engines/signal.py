@@ -2,6 +2,8 @@ import uuid, logging
 from datetime import datetime, timedelta
 from enum import Enum
 
+from numpy.core.fromnumeric import take
+
 class SignalStatus(Enum):
     NEW = "NEW"
     OPEN = "OPEN"
@@ -15,13 +17,14 @@ class Signal():
     def __init__(self,
                  base: str,
                  quote: str,
+                 take_profit: float,
                  spread: float,
                  purchase_price: float,
                  last_price: float,
                  direction: int,
                  callback: callable,
                  n_tick_forward: int,
-                 buffer: int = 3,
+                 buffer: int = 24,
                  realized_profit : float = 0.0,
                  id: str = str(uuid.uuid4()),
                  created_at: int = datetime.utcnow().timestamp(),
@@ -31,9 +34,10 @@ class Signal():
         self.base = base
         self.quote = quote
         self.symbol = f"{base}{quote}".upper()
+        self.take_profit = take_profit
         self.spread = spread
         self.purchase_price = purchase_price
-        mult = (1 + (spread / 100)) if direction == 1 else (1 - (spread / 100))
+        mult = (1 + (take_profit / 100)) if direction == 1 else (1 - (take_profit / 100))
         self.exit_price = purchase_price * mult
         self.last_price = last_price
         self.direction = direction
@@ -47,7 +51,7 @@ class Signal():
             minutes=(15 * (n_tick_forward + buffer)))).timestamp()
             if not expired_at else expired_at)
         logging.info(f"[signal] created! symbol:{self.symbol}, "
-            f"spread: {self.spread}, direction: {self.direction}")
+            f"spread: {self.spread}, ttp: {self.take_profit}, direction: {self.direction}")
     
     @property
     def status(self) -> SignalStatus:
@@ -79,10 +83,12 @@ class Signal():
         self.last_price = last_price
         # if last price have gone above the exit price
         if self.direction == 1 and last_price >= self.exit_price:
+            self.realized_profit = self.take_profit
             self._status = SignalStatus.COMPLETED
             self.callback(self)
         # if last price have gone above the exit price
         if self.direction == 0 and last_price <= self.exit_price:
+            self.realized_profit = self.take_profit
             self._status = SignalStatus.COMPLETED
             self.callback(self)
         # check if time has surpassed expected expired date
@@ -102,6 +108,7 @@ class Signal():
             base=self.base,
             quote=self.quote,
             symbol=self.symbol,
+            take_profit=self.take_profit,
             spread=self.spread,
             purchase_price=self.purchase_price,
             exit_price=self.exit_price,
@@ -134,6 +141,7 @@ def init_signal_from_rtd(data: dict, callback: callable) -> Signal:
     return Signal(
         base=data['base'],
         quote=data['quote'],
+        take_profit=data['take_profit'],
         spread=data['spread'],
         purchase_price=data['purchase_price'],
         last_price=data['last_price'],

@@ -13,11 +13,17 @@ class Strategy():
     def __init__(self, 
                  name: str, 
                  description: str, 
-                 spread: float,
+                 long_spread: float,
+                 long_ttp: float,
+                 short_spread: float,
+                 short_ttp: float,
                  log_metrics_every: int):
         self.name = name
         self.description = description
-        self.spread = spread
+        self.long_spread = long_spread
+        self.long_ttp = long_ttp
+        self.short_spread = short_spread,
+        self.short_ttp = short_ttp,
         self.log_metrics_every = log_metrics_every
         # initialize multi-core threads
         ne.set_vml_num_threads(8)
@@ -49,18 +55,17 @@ class Strategy():
             str(result['base']), 
             str(result['quote']))
     
-    def save_metrics(self, start: float, end: float, symbol: str):
+    def save_metrics(self, start: float, symbol: str):
         """ Will save metrics of running specific symbol.
 
             Parameters
             ----------
             start: `str`
                 The starting time of analysis in floating seconds.
-            end: `str`
-                The ending time of analysis in floating seconds.
             symbol: `str`
                 The ticker symbol.
         """
+        end = time.time()
         execution_time = round(end - start, 2)
         utctime = str(datetime.utcnow())
         if symbol not in self.metrics:
@@ -97,7 +102,10 @@ class SuperTrendSqueeze(Strategy):
         super().__init__(
             name="SUPERTREND_SQUEEZE", 
             description="SuperTrend x Squeeze Long vs. Short strategy.",
-            spread=0.4,
+            long_spread=1.0,
+            long_ttp=0.4,
+            short_spread=1.0,
+            short_ttp=0.4,
             log_metrics_every=20)
         # in this class we will be using
         # lazybear's momentum squeeze, ema 99
@@ -178,6 +186,7 @@ class SuperTrendSqueeze(Strategy):
         direction = ta_dataframe.iloc[-1][supertrend]
         squeeze = ta_dataframe.iloc[-1].SQZ_OFF
         last_price = ta_dataframe.iloc[-1].close
+        ttp = 0
         # if direction is long and squeeze is off
         if direction == 1 and squeeze == 1:
             # inference to layer 2
@@ -185,7 +194,11 @@ class SuperTrendSqueeze(Strategy):
                 base=base, quote=quote, data=clean_df.to_dict('list'))
             if _spread is None or _direction is None: return None
             # ensure that spread is above threshold and direction matches.
-            if _spread >= self.spread and _direction == 1: signal = True
+            if _spread >= self.long_spread and _direction == 1: 
+                ttp = self.long_ttp
+                signal = True
+            # record the ending time of analysis
+            self.save_metrics(start, f"{base}{quote}")
         # else if direction is short and squeeze is off
         elif direction == -1 and squeeze == 1:
             # inference to layer 2
@@ -193,22 +206,22 @@ class SuperTrendSqueeze(Strategy):
                 base=base, quote=quote, data=clean_df.to_dict('list'))
             if _spread is None or _direction is None: return None
             # ensure that spread is above threshold and direction matches.
-            if _spread >= self.spread and _direction == 0: signal = True
-        # if there's no signal generated return None
-        if not signal: return None
-        # record the ending time of analysis
-        end = time.time()
-        self.save_metrics(start, end, f"{base}{quote}")
+            if _spread >= self.short_spread and _direction == 0: 
+                ttp = self.short_ttp
+                signal = True
+            # record the ending time of analysis
+            self.save_metrics(start, f"{base}{quote}")
         # return the appropriate result
         return Signal(
             base=base,
             quote=quote,
+            take_profit=ttp,
             spread=_spread,
             purchase_price=float(last_price),
             last_price=float(last_price),
             direction=_direction,
             callback=callback,
-            n_tick_forward=_n_tick)
+            n_tick_forward=_n_tick) if signal else None
 
 __REGISTRY = {
     "STS": SuperTrendSqueeze
