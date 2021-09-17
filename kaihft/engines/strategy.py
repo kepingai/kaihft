@@ -22,8 +22,8 @@ class Strategy():
         self.description = description
         self.long_spread = long_spread
         self.long_ttp = long_ttp
-        self.short_spread = short_spread,
-        self.short_ttp = short_ttp,
+        self.short_spread = short_spread
+        self.short_ttp = short_ttp
         self.log_metrics_every = log_metrics_every
         # initialize multi-core threads
         ne.set_vml_num_threads(8)

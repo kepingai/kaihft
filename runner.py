@@ -1,6 +1,6 @@
-from functools import wraps
 import click, logging, os
 import kaihft.services as services
+from kaihft.alerts import notify_failure
 from kaihft.databases.database import KaiRealtimeDatabase
 from kaihft.publishers.client import KaiPublisherClient
 from kaihft.subscribers.client import KaiSubscriberClient
@@ -10,27 +10,12 @@ log_filename = 'logs/' + os.path.basename(__file__) + '.log'
 logging.basicConfig(level=logging.INFO,       
                     format="{asctime} [{levelname:8}] {process} {thread} {module}: {message}",       
                     style="{")
-# set environment credentials
-os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'credentials.json'
 # initialize publisher
 __PUBLISHER = KaiPublisherClient()
 __SUBSCRIBER = KaiSubscriberClient()
 # initiate access to database
 __DATABASE = KaiRealtimeDatabase()
 __MARKETS = {'btcusdt','ethusdt', 'adausdt', 'dogeusdt', 'dotusdt', 'uniusdt'}
-
-def notify_failure(fn: callable):
-    """ This decorator will output the traceback of a 
-        raised exception to slack and the log.
-    """
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        try: return fn(*args, **kwargs)
-        except Exception as error:
-            logging.error(error)
-            # TODO: send exception error to slack
-            raise error
-    return wrapper
 
 @click.group()
 def cli():

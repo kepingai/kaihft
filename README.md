@@ -19,3 +19,9 @@ $ cd kaihft
 $ mkdir tmp
 $ pip3 install -r requirements.txt
 ```
+
+# Run Locally
+Make sure that you are setting the `GOOGLE_APPLICATION_CREDENTIALS` in your environment to the specific credential json your supervisor give you. This will grant the application the overall accesibility of KepingAI's google services.
+```
+$ GOOGLE_APPLICATION_CREDENTIALS='credentials.json' python3 runner.py ticker-binance-spot
+```
