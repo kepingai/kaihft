@@ -87,6 +87,8 @@ class SignalEngine():
         # run the threads together
         ticker_thread.start()
         klines_thread.start()
+        ticker_thread.join()
+        klines_thread.join()
         logging.info(f"[synced] ticker-klines signal engine synced! - strategy: {self.strategy}, subscriber: {self.subscriber}")
             
     def update_signals(self, message: pubsub_v1.subscriber.message.Message):
