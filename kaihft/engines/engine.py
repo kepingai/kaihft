@@ -1,3 +1,4 @@
+from re import S
 import pandas as pd
 import logging, json, threading
 from datetime import datetime
@@ -13,7 +14,8 @@ class SignalEngine():
         self,
         database: KaiRealtimeDatabase,
         database_ref: str, 
-        topic_path: str,
+        archive_topic_path: str,
+        dist_topic_path: str,
         publisher: KaiPublisherClient,
         subscriber: KaiSubscriberClient,
         subscriptions_params: dict,
@@ -30,8 +32,10 @@ class SignalEngine():
                 real-time database containing the most-recent signals.
             database_ref: `str`
                 A string of database reference path.
-            topic_path: `str`
-                Is the distribute-signal topic path for new signals.
+            archive_topic_path: `str`
+                Is the signal archiving topic path for new and closed signals.
+            dist_topic_path: `str`
+                Is the distribute-signal topic path for new and closed signals.
             subscriber: `KaiSubscriberClient`
                 The subscriber client.
             subscriptions_params: `dict`
@@ -56,7 +60,8 @@ class SignalEngine():
         """
         self.database = database
         self.database_ref = database_ref
-        self.topic_path = topic_path
+        self.archive_topic_path = archive_topic_path
+        self.dist_topic_path = dist_topic_path
         self.publisher = publisher
         self.subscriber = subscriber
         self.subscriptions_params = self.validate_params(subscriptions_params)
@@ -102,12 +107,12 @@ class SignalEngine():
         if message.attributes:
             # get the symbol of the ticker
             symbol = message.attributes.get("symbol")
-            if symbol in self.signals:
+            if symbol in self.signals and self.signals[symbol].is_open():
                 # begin update to signal object
                 last_price = json.loads(message.data
                     .decode('utf-8'))['data']['last_price']
                 # update signal with the lastest price
-                self.signals[symbol].update(last_price=last_price)
+                self.signals[symbol].update(last_price)
         # acknowledge the message only if
         message.ack()
 
@@ -197,6 +202,10 @@ class SignalEngine():
                 self.signals[symbol] = signal
                 # distribute the signal
                 self.distribute_signal(signal)
+                # archive the signal
+                self.archive_signal(signal)
+                # update/set engine state in real-time
+                self.set_enging_state()
         except Exception as e:
             logging.error(f"[strategy] Exception caught running-strategy, "
                 f"symbol:-{symbol}, error: {e}")
@@ -215,17 +224,47 @@ class SignalEngine():
             logging.info(f"[closing] signal symbol: {signal.symbol} from engine state.")
             # distribute the completed / expired signal to topic
             self.distribute_signal(signal)
+            # archive the completed / expired signal to topic
+            self.archive_signal(signal)
             # delete the signal from signals dictionary
             del self.signals[signal.symbol]
             logging.info(f"current active signals: {self.signals.keys()}")
             # update the real-time database with newly updated dictionary
-            self.database.set(reference=self.database_ref, data=self.signals)
-            logging.info(f"[update] update-engine-state to "
-                f"database:{self.database_ref}, n-signals: {len(self.signals)}")
+            self.set_enging_state()
+    
+    def set_enging_state(self):
+        """ Will update database with the current engine state. """
+        # set the current engine state to database 
+        self.database.set(reference=self.database_ref, data=self.signals)
+        logging.info(f"[update] update-engine-state to "
+            f"database:{self.database_ref}, n-signals: {len(self.signals)}")
+
+    def archive_signal(self, signal: Signal):
+        """ Will send new signal and closed signal to
+            cloud pub/sub archiving topic.
+
+            Parameters
+            ----------
+            signal: `Signal`
+                A signal object publish to topic.
+        """
+        logging.info(f"[archiving] signal-archive to "
+            f"topic:{self.archive_topic_path}, symbol: {signal.symbol}")
+        # publish the newly created signal
+        # to dedicated archiving topic
+        self.publisher.publish(
+            origin=self.__class__.__name__,
+            topic_path=self.archive_topic_path,
+            data=signal.to_dict(),
+            attributes=dict(
+                symbol=signal.symbol,
+                base=signal.base,
+                quote=signal.quote,
+                status=str(signal.status)))
     
     def distribute_signal(self, signal: Signal):
-        """ Will send new signal to publisher topic & update
-            current engine state to database.
+        """ Will send new signal and closed signal to
+            cloud pub/sub distribution topic.
 
             Parameters
             ----------
@@ -233,25 +272,18 @@ class SignalEngine():
                 A signal object publish to topic.
         """
         logging.info(f"[distribute] signal-distributing to "
-            f"topic:{self.topic_path}, symbol: {signal.symbol}")
-        logging.info(f"current active signals: {self.signals.keys()}")
+            f"topic:{self.dist_topic_path}, symbol: {signal.symbol}")
         # publish the newly created signal
         # to dedicated distributed topic
         self.publisher.publish(
             origin=self.__class__.__name__,
-            topic_path=self.topic_path,
+            topic_path=self.dist_topic_path,
             data=signal.to_dict(),
             attributes=dict(
                 symbol=signal.symbol,
                 base=signal.base,
                 quote=signal.quote,
                 status=str(signal.status)))
-        logging.info(f"[distribute] signal-distributed to "
-            f"topic:{self.topic_path}, symbol: {signal.symbol}")
-        # set the current engine state to database 
-        self.database.set(reference=self.database_ref, data=self.signals)
-        logging.info(f"[update] update-engine-state to "
-            f"database:{self.database_ref}, n-signals: {len(self.signals)}")
     
     def format_dataframe(self, dataframe: pd.DataFrame) -> pd.DataFrame:
         """ Will format the dataframe to ensure appropriate format for

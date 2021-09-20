@@ -7,6 +7,7 @@ from numpy.core.fromnumeric import take
 class SignalStatus(Enum):
     NEW = "NEW"
     OPEN = "OPEN"
+    UPDATING = "UPDATING"
     CLOSED = "CLOSED"
     COMPLETED = "COMPLETED"
     EXPIRED = "EXPIRED"
@@ -52,6 +53,7 @@ class Signal():
             if not expired_at else expired_at)
         logging.info(f"[signal] created! symbol:{self.symbol}, "
             f"spread: {self.spread}, ttp: {self.take_profit}, direction: {self.direction}")
+        self.open()
     
     @property
     def status(self) -> SignalStatus:
@@ -65,6 +67,14 @@ class Signal():
         """ Will close the signal immediately. """
         self._status = SignalStatus.CLOSED
         self.callback(self)
+    
+    def is_open(self) -> bool:
+        """ Returns
+            ------- 
+            `bool` 
+                Returns `True` if signal is still open.
+        """
+        return self._status == SignalStatus.OPEN
     
     def update(self, last_price: float) -> SignalStatus:
         """ Will update the signal's status based upon the current
@@ -80,23 +90,34 @@ class Signal():
             `SignalStatus`
                 Will return the update status of the signal.
         """
+        # update the status of the signal
+        # so that update is sequential from engine
+        self._status = SignalStatus.UPDATING
         self.last_price = last_price
         # if last price have gone above the exit price
         if self.direction == 1 and last_price >= self.exit_price:
             self.realized_profit = round(abs(self.last_price - 
                 self.purchase_price) / self.purchase_price * 100, 4)
+            logging.info(f"[completed] signal - symbol: {self.symbol}, "
+                f"direction: {self.direction}, realized-profit: {self.realized_profit}%")
             self._status = SignalStatus.COMPLETED
             self.callback(self)
         # if last price have gone above the exit price
         elif self.direction == 0 and last_price <= self.exit_price:
             self.realized_profit = round(abs(self.last_price - 
                 self.purchase_price) / self.purchase_price * 100, 4)
+            logging.info(f"[completed] signal - symbol: {self.symbol}, "
+                f"direction: {self.direction}, realized-profit: {self.realized_profit}%")
             self._status = SignalStatus.COMPLETED
             self.callback(self)
         # check if time has surpassed expected expired date
         elif datetime.utcnow().timestamp() >= self.expired_at:
             self._status = SignalStatus.EXPIRED
+            logging.info(f"[expired] signal - symbol: {self.symbol}, "
+                f"direction: {self.direction}, expiration: {self.expired_at}")
             self.callback(self) 
+        # signal is updated and back to open
+        else: self.open()
         return self._status
     
     def to_dict(self) -> dict:
