@@ -28,7 +28,7 @@ class Signal():
                  buffer: int = 24,
                  realized_profit : float = 0.0,
                  id: str = None,
-                 created_at: int = datetime.utcnow().timestamp(),
+                 created_at: int = None,
                  expired_at: int = None,
                  status: SignalStatus = SignalStatus.NEW):
         self.id = id if id else str(uuid.uuid4())
@@ -47,7 +47,7 @@ class Signal():
         self._status = status
         self.buffer = buffer
         self.realized_profit = realized_profit
-        self.created_at = created_at
+        self.created_at = datetime.utcnow().timestamp() if not created_at else created_at
         self.expired_at = ((datetime.fromtimestamp(self.created_at) + timedelta(
             minutes=(15 * (n_tick_forward + buffer)))).timestamp()
             if not expired_at else expired_at)
