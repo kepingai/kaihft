@@ -106,7 +106,7 @@ class SuperTrendSqueeze(Strategy):
             long_ttp=0.6,
             short_spread=0.8,
             short_ttp=0.4,
-            log_metrics_every=20)
+            log_metrics_every=100)
         # in this class we will be using
         # lazybear's momentum squeeze, ema 99
         # supertrend and sma for technical analysis
