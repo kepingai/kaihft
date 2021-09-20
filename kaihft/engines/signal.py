@@ -26,11 +26,11 @@ class Signal():
                  n_tick_forward: int,
                  buffer: int = 24,
                  realized_profit : float = 0.0,
-                 id: str = str(uuid.uuid4()),
+                 id: str = None,
                  created_at: int = datetime.utcnow().timestamp(),
                  expired_at: int = None,
                  status: SignalStatus = SignalStatus.NEW):
-        self.id = id
+        self.id = id if id else str(uuid.uuid4())
         self.base = base
         self.quote = quote
         self.symbol = f"{base}{quote}".upper()

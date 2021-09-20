@@ -180,26 +180,26 @@ class SignalEngine():
                 }
             }
         """
-        # try:
-        # will convert klines to dataframe and
-        # format the dataframe appropriately
-        dataframe = pd.DataFrame(klines)
-        dataframe = self.format_dataframe(dataframe)
-        # run technical analysis & inference to layer 2
-        signal = self.strategy.scout(
-            base=base, 
-            quote=quote,
-            dataframe=dataframe, 
-            callback=self.close_signal)
-        # if signal is triggered
-        if signal: 
-            # save the signal to class attrs
-            self.signals[symbol] = signal
-            # distribute the signal
-            self.distribute_signal(signal)
-        # except Exception as e:
-        #     logging.error(f"[strategy] Exception caught running-strategy, "
-        #         f"symbol:-{symbol}, error: {e}")
+        try:
+            # will convert klines to dataframe and
+            # format the dataframe appropriately
+            dataframe = pd.DataFrame(klines)
+            dataframe = self.format_dataframe(dataframe)
+            # run technical analysis & inference to layer 2
+            signal = self.strategy.scout(
+                base=base, 
+                quote=quote,
+                dataframe=dataframe, 
+                callback=self.close_signal)
+            # if signal is triggered
+            if signal: 
+                # save the signal to class attrs
+                self.signals[symbol] = signal
+                # distribute the signal
+                self.distribute_signal(signal)
+        except Exception as e:
+            logging.error(f"[strategy] Exception caught running-strategy, "
+                f"symbol:-{symbol}, error: {e}")
 
     def close_signal(self, signal: Signal):
         """ A callback function that will 
