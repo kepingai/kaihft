@@ -192,7 +192,7 @@ class SignalEngine():
                 dataframe=dataframe, 
                 callback=self.close_signal)
             # if signal is triggered
-            if signal: 
+            if signal and signal.symbol not in self.signals: 
                 # save the signal to class attrs
                 self.signals[symbol] = signal
                 # distribute the signal
@@ -211,16 +211,17 @@ class SignalEngine():
             signal: `Signal`
                 A signal object to delete from state.
         """
-        logging.info(f"[closing] signal symbol: {signal.symbol} from engine state.")
-        # distribute the completed / expired signal to topic
-        self.distribute_signal(signal)
-        # delete the signal from signals dictionary
-        if signal.symbol in self.signals: del self.signals[signal.symbol]
-        logging.info(f"current active signals: {self.signals.keys()}")
-        # update the real-time database with newly updated dictionary
-        self.database.set(reference=self.database_ref, data=self.signals)
-        logging.info(f"[update] update-engine-state to "
-            f"database:{self.database_ref}, n-signals: {len(self.signals)}")
+        if signal.symbol in self.signals: 
+            logging.info(f"[closing] signal symbol: {signal.symbol} from engine state.")
+            # distribute the completed / expired signal to topic
+            self.distribute_signal(signal)
+            # delete the signal from signals dictionary
+            del self.signals[signal.symbol]
+            logging.info(f"current active signals: {self.signals.keys()}")
+            # update the real-time database with newly updated dictionary
+            self.database.set(reference=self.database_ref, data=self.signals)
+            logging.info(f"[update] update-engine-state to "
+                f"database:{self.database_ref}, n-signals: {len(self.signals)}")
     
     def distribute_signal(self, signal: Signal):
         """ Will send new signal to publisher topic & update
