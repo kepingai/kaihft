@@ -18,7 +18,7 @@ __MARKETS = {
     'aaveusdt', 'adausdt', 'algousdt', 'btcusdt', 'crvusdt', 'dogeusdt',
     'dotusdt', 'egldusdt', 'ethusdt', 'linkusdt', 'ltcusdt', 'maticusdt',
     'oneusdt', 'solusdt', 'uniusdt', 'vetusdt', 'xlmusdt', 'xmrusdt',
-    'xrpusdt', 'xtzusdt', 'zecusdt'
+    'xtzusdt', 'zecusdt'
 }
 
 @click.group()
