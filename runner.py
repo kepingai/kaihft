@@ -14,7 +14,12 @@ __PUBLISHER = KaiPublisherClient()
 __SUBSCRIBER = KaiSubscriberClient()
 # initiate access to database
 __DATABASE = KaiRealtimeDatabase()
-__MARKETS = {'btcusdt','ethusdt', 'adausdt', 'dogeusdt', 'dotusdt', 'uniusdt'}
+__MARKETS = {
+    'aaveusdt', 'adausdt', 'algousdt', 'btcusdt', 'crvusdt', 'dogeusdt',
+    'dotusdt', 'egldusdt', 'ethusdt', 'linkusdt', 'ltcusdt', 'maticusdt',
+    'oneusdt', 'solusdt', 'uniusdt', 'vetusdt', 'xlmusdt', 'xmrusdt',
+    'xrpusdt', 'xtzusdt', 'zecusdt'
+}
 
 @click.group()
 def cli():
