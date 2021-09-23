@@ -11,7 +11,8 @@ class KaiSubscriberClient():
     def subscribe(self,
                   subscription_id: str,
                   callback: callable,
-                  timeout: int = None):
+                  timeout: int = None,
+                  single_stream: bool = True):
         """ Subscribe messages asynchronously.
 
             Parameters
@@ -19,29 +20,36 @@ class KaiSubscriberClient():
             subscription_id: `str`
                 The subscription id to listen to.
             callback: `callable`
-
+                The callback function.
             timeout: `int`
                 The number of seconds the subscriber should listen for messages.
+            single_stream: `bool`
+
         """
         # retrieve the subscription path and initialize
         # the streaming pull to begin subscription
-        subscription_path = self.client.subscription_path(
+        self.subscription_path = self.client.subscription_path(
             self.project_id, subscription_id)
-        streaming_pull_future = self.client.subscribe(
-            subscription_path, callback=callback)
+        self.streaming_pull_future = self.client.subscribe(
+            self.subscription_path, callback=callback)
         # log initialization of subscribing to subscription path
         logging.info(
-            f"[subscription] listening for messages on {subscription_path}, timeout: {timeout}")
-        # wrap subscriber in a 'with' block to automatically
-        # call cancel() when subscription is done
-        with self.client:
-            try:
-                # When `timeout` is not set, result() will block indefinitely,
-                # unless an exception is encountered first.
-                streaming_pull_future.result(timeout=timeout)
-            except TimeoutError as e:
-                # Trigger the shutdown.
-                streaming_pull_future.cancel()  
-                # Block until the shutdown is complete.
-                streaming_pull_future.result()  
-                logging.error(f"Exception caught {self.subscription_id}, Error: {e}")
+            f"[subscription] listening for messages on {self.subscription_path}, timeout: {timeout}")
+        # run single stream
+        if single_stream:
+            # wrap subscriber in a 'with' block to automatically
+            # call cancel() when subscription is done
+            with self.client:
+                try:
+                    # When `timeout` is not set, result() will block indefinitely,
+                    # unless an exception is encountered first.
+                    self.streaming_pull_future.result(timeout=timeout)
+                except TimeoutError as e:
+                    # Trigger the shutdown.
+                    self.streaming_pull_future.cancel()  
+                    # Block until the shutdown is complete.
+                    self.streaming_pull_future.result()  
+                    logging.error(f"Exception caught {subscription_id}, Error: {e}")
+        else:
+            logging.warn(f"[multiple-stream] make sure to use `add_done_callback` "
+                f"to ensure final done is handled properly! id: {subscription_id}")

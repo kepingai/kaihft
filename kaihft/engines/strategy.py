@@ -17,14 +17,14 @@ class Strategy():
                  long_ttp: float,
                  short_spread: float,
                  short_ttp: float,
-                 log_metrics_every: int):
+                 log_every: int):
         self.name = name
         self.description = description
         self.long_spread = long_spread
         self.long_ttp = long_ttp
         self.short_spread = short_spread
         self.short_ttp = short_ttp
-        self.log_metrics_every = log_metrics_every
+        self.log_every = log_every
         # initialize multi-core threads
         ne.set_vml_num_threads(8)
         # initialize running metrics
@@ -87,14 +87,17 @@ class Strategy():
                     total_execution_time=round(total_execution_time, 2)
                 )
             )
-        if self.metrics[symbol]['count'] % self.log_metrics_every == 0:
+        if self.metrics[symbol]['count'] % self.log_every == 0:
             metrics = ", ".join([f"{key} : {value}" 
-                for key, value in self.metrics[symbol].items()])
+                for key, value in self.metrics[symbol].items()
+                if key != 'count'])
             logging.info(f"[metrics] strategy-{self.name}, symbol: {symbol}, "
                 f"metrics: {metrics}")
+            # reset the count to 1 to avoid memory leak
+            self.metrics[symbol]['count'] = 1
 
 class SuperTrendSqueeze(Strategy):
-    def __init__(self):
+    def __init__(self, log_every: int):
         """ SuperTrend Squeeze strategy implementation
             will scout for potential actionable
             intelligence based on a specific market behavior. 
@@ -106,7 +109,7 @@ class SuperTrendSqueeze(Strategy):
             long_ttp=0.6,
             short_spread=0.8,
             short_ttp=0.4,
-            log_metrics_every=100)
+            log_every=log_every)
         # in this class we will be using
         # lazybear's momentum squeeze, ema 99
         # supertrend and sma for technical analysis

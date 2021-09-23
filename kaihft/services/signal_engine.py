@@ -5,11 +5,10 @@ from kaihft.subscribers.client import KaiSubscriberClient
 from kaihft.engines import SignalEngine
 
 def main(exchange: str,
-         database: KaiRealtimeDatabase,
-         publisher: KaiPublisherClient,
-         subscriber: KaiSubscriberClient,
          strategy: str,
          production: bool,
+         log_every: int,
+         log_metrics_every: int,
          timeout: int = None,
          version: str = 'v0'):
     """ Running specified strategy to specified exchange 
@@ -27,6 +26,10 @@ def main(exchange: str,
             The ticker & klines subscription timeout, default to None.
         version: `str`
             The topic versions.
+        log_every: `int`
+                Log ticker and klines messages every.
+        log_metrics_every: `int`
+            Log layer 2 inference metrics every.
     """
     if production:
         ticker_topic_path = f'prod-ticker-{exchange}-{version}-sub'
@@ -48,6 +51,12 @@ def main(exchange: str,
         "ticker": dict(id=ticker_topic_path, timeout=timeout),
         "klines": dict(id=klines_topic_path, timeout=timeout)
     }
+    # initialize publisher
+    publisher = KaiPublisherClient()
+    ticker_subscriber = KaiSubscriberClient()
+    klines_subscriber = KaiSubscriberClient()
+    # initiate access to database
+    database = KaiRealtimeDatabase()
     # initialize engine and start running!
     signal_engine = SignalEngine(
         database=database,
@@ -55,7 +64,11 @@ def main(exchange: str,
         archive_topic_path=archive_topic_path,
         dist_topic_path=dist_topic_path,
         publisher=publisher,
-        subscriber=subscriber,
+        ticker_subscriber=ticker_subscriber,
+        klines_subscriber=klines_subscriber,
         subscriptions_params=params,
+        log_every=log_every,
+        log_metrics_every=log_metrics_every,
         strategy=strategy)
+    # run the engine!
     signal_engine.run()

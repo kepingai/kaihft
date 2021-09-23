@@ -5,7 +5,6 @@ from binance.client import Client
 from unicorn_binance_websocket_api.unicorn_binance_websocket_api_manager import BinanceWebSocketApiManager
 
 def main(
-    publisher: KaiPublisherClient, 
     n_klines: int, 
     markets: dict, 
     production: bool,
@@ -15,8 +14,6 @@ def main(
         
         Parameters
         ----------
-        publisher: `KaiPublisherClient`
-            Is a Cloud Pub/Sub Client.
         n_klines: `int`
             The number of klines to publish.
         markets: `dict`
@@ -43,6 +40,8 @@ def main(
     stream_id = binance_websocket_api_manager.create_stream(
         channels=channels, 
         markets=markets)
+    # initialize publisher
+    publisher = KaiPublisherClient()
     # initialize binance klines publisher
     # and run the publisher.
     klines_publisher = BinanceKlinesPublisher(
