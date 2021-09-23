@@ -89,12 +89,16 @@ class Strategy():
             )
         if self.metrics[symbol]['count'] % self.log_every == 0:
             metrics = ", ".join([f"{key} : {value}" 
-                for key, value in self.metrics[symbol].items()
-                if key != 'count'])
+                for key, value in self.metrics[symbol].items()])
             logging.info(f"[metrics] strategy-{self.name}, symbol: {symbol}, "
-                f"metrics: {metrics}")
+                f"metrics: {metrics}, metrics-reset-every {self.log_every} times.")
             # reset the count to 1 to avoid memory leak
-            self.metrics[symbol]['count'] = 1
+            self.metrics[symbol] = dict(
+                last_execution_time=execution_time,
+                last_utc_timestamp=str(datetime.utcnow()),
+                count=1,
+                average_execution_time=execution_time,
+                total_execution_time=execution_time)
 
 class SuperTrendSqueeze(Strategy):
     def __init__(self, log_every: int):
