@@ -1,6 +1,5 @@
-from re import S
 import pandas as pd
-import logging, json, threading
+import logging, json, asyncio
 from datetime import datetime
 from google.cloud import pubsub_v1
 from kaihft.databases import KaiRealtimeDatabase
@@ -17,8 +16,11 @@ class SignalEngine():
         archive_topic_path: str,
         dist_topic_path: str,
         publisher: KaiPublisherClient,
-        subscriber: KaiSubscriberClient,
+        ticker_subscriber: KaiSubscriberClient,
+        klines_subscriber: KaiSubscriberClient,
         subscriptions_params: dict,
+        log_every: int,
+        log_metrics_every: int,
         strategy: str = 'STS'):
         """ Will initialize the signal engine
             to scout for potential actionable intelligence
@@ -36,13 +38,19 @@ class SignalEngine():
                 Is the signal archiving topic path for new and closed signals.
             dist_topic_path: `str`
                 Is the distribute-signal topic path for new and closed signals.
-            subscriber: `KaiSubscriberClient`
-                The subscriber client.
+            ticker_subscriber: `KaiSubscriberClient`
+                The subscriber client for ticker.
+            klines_subscriber: `KaiSubscriberClient`
+                The subscriber client for klines.
             subscriptions_params: `dict`
                 A dictionary containing the subscription id and timeout.
             strategy: `str`
                 The strategy to run, default to STS.
-            
+            log_every: `int`
+                Log ticker and klines messages every.
+            log_metrics_every: `int`
+                Log layer 2 inference metrics every.
+
             Example
             -------
             subscription_params example please follow:
@@ -63,38 +71,67 @@ class SignalEngine():
         self.archive_topic_path = archive_topic_path
         self.dist_topic_path = dist_topic_path
         self.publisher = publisher
-        self.subscriber = subscriber
+        self.ticker_subscriber = ticker_subscriber
+        self.klines_subscriber = klines_subscriber
         self.subscriptions_params = self.validate_params(subscriptions_params)
+        self.scouts = []
+        self.log_every = log_every
+        self.log_metrics_every = log_metrics_every
+        self.ticker_counts = 1
+        self.klines_counts = 1
         self.strategy = self._get_strategy(strategy)
     
     def run(self):
         """ Will run signal engine concurrent threads asynchronously. """
-        logging.info(f"[start] signal engine starts - strategy: {self.strategy}, subscriber: {self.subscriber}")
+        logging.warn(f"[start] signal engine starts - strategy: {self.strategy}")
         # retrive the most recent signal data from subscriber
         self.signals = self.get_signals()
         # log the signals that is currently running in pub/sub
         for symbol, signal in self.signals.items():
-            logging.info(f"*running-signal* - symbol: {symbol}, symbol: {signal.symbol}, direction: {signal.direction}, spread: {signal.spread}")
-        # run engine concurrently in separate threads
-        # create separate thread to update signals
-        # with the most recent ticker data from subscriber.
-        ticker_thread = threading.Thread(
-                target=self.subscribe,
-                args=('ticker', self.update_signals), 
-                name=f"thread-ticker-subscription")
-        # create separate thread to subscribe with the latest
-        # klines from subscription client. Use the klines data 
-        # to run strategy and inference to layer 2.
-        klines_thread = threading.Thread(
-                target=self.subscribe,
-                args=('klines', self.scout_signals), 
-                name=f"thread-klines-subscription")
-        # run the threads together
-        ticker_thread.start()
-        klines_thread.start()
-        ticker_thread.join()
-        klines_thread.join()
-        logging.info(f"[synced] ticker-klines signal engine synced! - strategy: {self.strategy}, subscriber: {self.subscriber}")
+            logging.info(f"*running-signal* - symbol: {symbol}, "
+                f"symbol: {signal.symbol}, direction: {signal.direction}, "
+                f"spread: {signal.spread}")
+        # begin coroutines and concurrency control
+        asyncio.run(self._run())
+        # engine stopped!
+        logging.warn(f"[stop] signal engine stops -  strategy {self.strategy} ")
+    
+    async def _run(self):
+        """ Subscribe to ticker and klines subscription 
+            and begin the signal engine on scouting and monitoring
+            ongoing signals concurrently.
+        """
+        await asyncio.gather(
+            self.subscribe(self.ticker_subscriber, 'ticker', self.update_signals),
+            self.subscribe(self.klines_subscriber, 'klines', self.scout_signals)
+        )
+        with self.ticker_subscriber.client, self.klines_subscriber.client:
+            try:
+                # When `timeout` is not set, result() will block indefinitely,
+                # unless an exception is encountered first.
+                self.ticker_subscriber.streaming_pull_future.result(
+                    timeout=self.subscriptions_params['ticker']['timeout'])
+                self.klines_subscriber.streaming_pull_future.result(
+                    timeout=self.subscriptions_params['klines']['timeout'])
+            except TimeoutError as e:
+                # Trigger the shutdown.
+                self.ticker_subscriber.streaming_pull_future.cancel()  
+                self.klines_subscriber.streaming_pull_future.cancel()
+                # Block until the shutdown is complete.
+                self.ticker_subscriber.streaming_pull_future.result()  
+                self.klines_subscriber.streaming_pull_future.result()
+                logging.error(f"Exception caught subscription, Error: {e}")
+    
+    async def subscribe(self,
+                        subscriber: KaiSubscriberClient,
+                        subscription: str,
+                        callback: callable):
+        # start subscription path and futures
+        subscriber.subscribe(
+            subscription_id=self.subscriptions_params[subscription]['id'],
+            timeout=self.subscriptions_params[subscription]['timeout'],
+            callback=callback,
+            single_stream=False)
             
     def update_signals(self, message: pubsub_v1.subscriber.message.Message):
         """ Update signals with the most recent data. 
@@ -105,14 +142,25 @@ class SignalEngine():
                 The message from Cloud pub/sub.
         """
         if message.attributes:
-            # get the symbol of the ticker
+            message_time = datetime.utcfromtimestamp(message.publish_time.timestamp())
+            seconds_passed = (datetime.utcnow() - message_time).total_seconds()
+            # get the symbol
             symbol = message.attributes.get("symbol")
-            if symbol in self.signals and self.signals[symbol].is_open():
-                # begin update to signal object
-                last_price = json.loads(message.data
-                    .decode('utf-8'))['data']['last_price']
-                # update signal with the lastest price
-                self.signals[symbol].update(last_price)
+            # only accept messages within 30 seconds
+            if seconds_passed <= 30:
+                if symbol in self.signals and self.signals[symbol].is_open():
+                    # begin update to signal object
+                    last_price = json.loads(message.data
+                        .decode('utf-8'))['data']['last_price']
+                    # update signal with the lastest price
+                    self.signals[symbol].update(last_price)
+            if self.ticker_counts % self.log_every == 0:
+                logging.info(f"[ticker] cloud pub/sub messages running, "
+                    f"latency: {seconds_passed}s, last-symbol: {symbol}")
+                # reset the signal counts to 1
+                self.ticker_counts = 1
+            # add the counter for each message received
+            self.ticker_counts += 1
         # acknowledge the message only if
         message.ack()
 
@@ -125,33 +173,34 @@ class SignalEngine():
                 The message from Cloud pub/sub.
         """
         if message.attributes:
-            # get the symbol of the klines
-            base = message.attributes.get('base')
-            quote = message.attributes.get('quote')
+            message_time = datetime.utcfromtimestamp(message.publish_time.timestamp())
+            seconds_passed = (datetime.utcnow() - message_time).total_seconds()
             symbol = message.attributes.get("symbol")
-            tag = "[thread]"
-            thread_name = f"{tag}-{symbol}"
-            threads = [thread.name for thread in threading.enumerate() if thread.name.startswith(tag)]
-            if symbol not in self.signals and thread_name not in threads:
-                # run a separate thread to run startegy
-                klines = json.loads(message.data.decode('utf-8'))['data']
-                scout_thread = threading.Thread(
-                    target=self.run_strategy,
-                    args=(base, quote, symbol, klines),
-                    name=thread_name)
-                # start the scouting thread
-                scout_thread.start()
-                scout_thread.join()
-            # else: 
-            #     print(f"not running scout, symbol: {symbol}, signals: {self.signals.keys()}, threads: {threads}")
+            # only accept messages within 30 seconds
+            if seconds_passed <= 30:
+                # get the symbol of the klines
+                base = message.attributes.get('base')
+                quote = message.attributes.get('quote')
+                # only run strategy if symbol is currently
+                # not an ongoing signal and also not currently
+                # awaiting for a result from running strategy
+                if symbol not in self.signals and symbol not in self.scouts:
+                    # append the symbol in scouts
+                    self.scouts.append(symbol)
+                    # run a separate thread to run startegy
+                    klines = json.loads(message.data.decode('utf-8'))['data']
+                    self.run_strategy(base, quote, symbol, klines)
+            if self.klines_counts % self.log_every == 0:
+                logging.info(f"[klines] cloud pub/sub messages running, "
+                    f"latency: {seconds_passed}s, last-symbol: {symbol}")
+                # reset the signal counts to 1
+                self.klines_counts = 1
+            # add the counter for each message received
+            self.klines_counts += 1
         # acknowledge the message
         message.ack()
 
-    def run_strategy(self, 
-                     base: str, 
-                     quote: str, 
-                     symbol: str,
-                     klines: dict):
+    def run_strategy(self, base: str, quote: str, symbol: str, klines: dict):
         """ Run strategy to the given klines data. 
 
             Parameters
@@ -190,7 +239,8 @@ class SignalEngine():
             # format the dataframe appropriately
             dataframe = pd.DataFrame(klines)
             dataframe = self.format_dataframe(dataframe)
-            # run technical analysis & inference to layer 2
+            # run technical analysis & inference to layer 2,
+            # await for futures before the remaining tasks.
             signal = self.strategy.scout(
                 base=base, 
                 quote=quote,
@@ -209,6 +259,10 @@ class SignalEngine():
         except Exception as e:
             logging.error(f"[strategy] Exception caught running-strategy, "
                 f"symbol:-{symbol}, error: {e}")
+        finally:
+            # ensure that the symbol is removed
+            # from scouts so that there will be no locks.
+            self.scouts.remove(symbol)
 
     def close_signal(self, signal: Signal):
         """ A callback function that will 
@@ -306,25 +360,6 @@ class SignalEngine():
                 (x / 1000)).strftime('%c'))))
         dataframe[ohlcv] = dataframe[ohlcv].astype('float32')
         return dataframe
-        
-    def subscribe(self, 
-                  subscription: str, 
-                  callback: callable):
-        """ Will subscribe to topic and initialize a callback
-            everytime a message is published to this topic.
-
-            Parameters
-            ----------
-            subscription: `str`
-                The subscription topic
-            callback: `callable`
-                The callback function for every message.
-
-        """
-        self.subscriber.subscribe(
-            subscription_id=self.subscriptions_params[subscription]['id'],
-            callback=callback,
-            timeout=self.subscriptions_params[subscription]['timeout'])
     
     def get_signals(self) -> dict:
         """ Will return the last signals sent to topic. 
@@ -385,4 +420,4 @@ class SignalEngine():
             `KeyError`
                 If key id not match or strategy not available.
         """
-        return get_strategy(strategy)()
+        return get_strategy(strategy)(log_every=self.log_metrics_every)

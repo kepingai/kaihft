@@ -75,7 +75,7 @@ class Signal():
                 Returns `True` if signal is still open.
         """
         return self._status == SignalStatus.OPEN
-    
+        
     def update(self, last_price: float) -> SignalStatus:
         """ Will update the signal's status based upon the current
             last price of the ticker.
@@ -91,7 +91,7 @@ class Signal():
                 Will return the update status of the signal.
         """
         # update the status of the signal
-        # so that update is sequential from engine
+        # this will prevent duplicate runs
         self._status = SignalStatus.UPDATING
         self.last_price = last_price
         # if last price have gone above the exit price
@@ -119,7 +119,7 @@ class Signal():
         # signal is updated and back to open
         else: self.open()
         return self._status
-    
+
     def to_dict(self) -> dict:
         """ Returns
             -------

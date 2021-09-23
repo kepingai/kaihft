@@ -4,7 +4,6 @@ from kaihft.publishers.client import KaiPublisherClient
 from unicorn_binance_websocket_api.unicorn_binance_websocket_api_manager import BinanceWebSocketApiManager
 
 def main(
-    publisher: KaiPublisherClient, 
     markets: dict, 
     production: bool,
     topic_path: str = 'ticker-binance-v0'):
@@ -13,8 +12,6 @@ def main(
 
         Parameters
         ----------
-        publisher: `KaiPublisherClient`
-            Is a Cloud Pub/Sub Client.
         markets: `dict`
             A dictionary containing the symbols to 
             retrieve data from websocket.
@@ -39,6 +36,8 @@ def main(
     stream_id = binance_websocket_api_manager.create_stream(
         channels=channels, 
         markets=markets)
+    # initialize publisher
+    publisher = KaiPublisherClient()
     # initialize binance ticker publisher
     # and run the publisher.
     ticker_publisher = BinanceTickerPublisher(
