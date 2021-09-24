@@ -1,11 +1,12 @@
-import click, logging, os
+import click, logging, sys
 import kaihft.services as services
 from kaihft.alerts import notify_failure
 
 # logging verbose mode
-logging.basicConfig(level=logging.INFO,       
-                    format="{asctime} [{levelname:8}] {process} {thread} {module}: {message}",       
-                    style="{")
+logging.basicConfig(
+    level=logging.INFO,       
+    format="{asctime} [{levelname:8}] {process} {thread} {module}: {message}",       
+    style="{", handlers=[logging.StreamHandler(sys.stdout)])
 
 __MARKETS = {
     'aaveusdt', 'adausdt', 'algousdt', 'btcusdt', 'crvusdt', 'dogeusdt'
