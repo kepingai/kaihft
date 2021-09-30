@@ -13,6 +13,7 @@ class SignalEngine():
         self,
         database: KaiRealtimeDatabase,
         database_ref: str, 
+        thresholds_ref: str,
         archive_topic_path: str,
         dist_topic_path: str,
         publisher: KaiPublisherClient,
@@ -68,6 +69,7 @@ class SignalEngine():
         """
         self.database = database
         self.database_ref = database_ref
+        self.thresholds_ref = thresholds_ref
         self.archive_topic_path = archive_topic_path
         self.dist_topic_path = dist_topic_path
         self.publisher = publisher
@@ -79,7 +81,8 @@ class SignalEngine():
         self.log_metrics_every = log_metrics_every
         self.ticker_counts = 1
         self.klines_counts = 1
-        self.strategy = self._get_strategy(strategy)
+        self.thresholds = self._get_thresholds()
+        self.strategy = self._get_strategy(strategy, self.thresholds)
     
     def run(self):
         """ Will run signal engine concurrently """
@@ -404,20 +407,50 @@ class SignalEngine():
             'timeout' in params['klines']), "Subscription klines param badly formatted."
         return params
     
-    def _get_strategy(self, strategy: str) -> Strategy:
+    def _get_thresholds(self) -> dict:
+        """ Will retrieve the thresholds for layer1.
+            
+            Returns
+            -------
+            `dict`
+                A dictionary containing thresholds for
+                long and short strategies.
+        """
+        logging.info(f"[get] retrieving-thresholds from signal database.")
+        thresholds = self.database.get(self.thresholds_ref)
+        if not thresholds: raise ValueError(f"Thresholds are not set for layer 1!")
+        if 'long' not in thresholds or 'short' not in thresholds: 
+            ValueError(f"Thresholds required `long` and `short`, instead got: {thresholds.keys()}")
+        for dir, threshold in thresholds.items():
+            if 'bet_threshold' not in threshold or 'ttp_threshold' not in threshold:
+                raise ValueError(f"Missing `bet_threshold` and/or `ttp_threshold` "
+                    f", instead got: {threshold}, direction: {dir}")
+        logging.info(f"[get] retrieved-thresholds: {thresholds} from database.")
+        return thresholds
+    
+    def _get_strategy(self, strategy: str, thresholds: dict) -> Strategy:
         """ Will return the strategy chosen.
 
             Parameters
             ----------
             strategy: `str`
                 The strategy to run.
+            thresholds: `dict`
+                A dictionary containing long & short thresholds
+
             Returns
             -------
             `Strategy`
                 A strategy inherited instance.
+
             Raises
             ------
             `KeyError`
                 If key id not match or strategy not available.
         """
-        return get_strategy(strategy)(log_every=self.log_metrics_every)
+        return get_strategy(strategy)(
+            long_spread=thresholds['long']['bet_threshold'],
+            long_ttp=thresholds['long']['ttp_threshold'],
+            short_spread=thresholds['short']['bet_threshold'],
+            short_ttp=thresholds['short']['ttp_threshold'],
+            log_every=self.log_metrics_every)

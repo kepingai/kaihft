@@ -101,7 +101,12 @@ class Strategy():
                 total_execution_time=execution_time)
 
 class SuperTrendSqueeze(Strategy):
-    def __init__(self, log_every: int):
+    def __init__(self, 
+                long_spread: float,
+                long_ttp: float,
+                short_spread: float,
+                short_ttp: float,
+                log_every: int):
         """ SuperTrend Squeeze strategy implementation
             will scout for potential actionable
             intelligence based on a specific market behavior. 
@@ -109,10 +114,10 @@ class SuperTrendSqueeze(Strategy):
         super().__init__(
             name="SUPERTREND_SQUEEZE", 
             description="SuperTrend x Squeeze Long vs. Short strategy.",
-            long_spread=1.1,
-            long_ttp=0.6,
-            short_spread=0.8,
-            short_ttp=0.4,
+            long_spread=long_spread,
+            long_ttp=long_ttp,
+            short_spread=short_spread,
+            short_ttp=short_ttp,
             log_every=log_every)
         # in this class we will be using
         # lazybear's momentum squeeze, ema 99
@@ -141,6 +146,9 @@ class SuperTrendSqueeze(Strategy):
             }]
         self.strategy = ta.Strategy(name=self.name,
             description=self.description, ta=self.technical_analysis)
+        logging.info(f"[strategy] Strategy initialized {self.name}, "
+            f"long_spread: {self.long_spread}, long_ttp: {self.long_ttp}, "
+            f"short_spread: {self.short_spread}, short_ttp: {self.short_ttp}")
     
     def scout(self, 
               base: str, 

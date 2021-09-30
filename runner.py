@@ -9,10 +9,11 @@ logging.basicConfig(
     style="{", handlers=[logging.StreamHandler(sys.stdout)])
 
 __MARKETS = {
-    'aaveusdt', 'adausdt', 'algousdt', 'btcusdt', 'crvusdt', 'dogeusdt'
-    'dotusdt', 'egldusdt', 'ethusdt', 'linkusdt', 'ltcusdt', 'maticusdt',
-    'oneusdt', 'solusdt', 'uniusdt', 'vetusdt', 'xlmusdt', 'xmrusdt',
-    'xtzusdt', 'zecusdt'
+    '1inchusdt','aaveusdt', 'adausdt', 'algousdt', 'atomusdt', 'batusdt', 
+    'bnbusdt', 'btcusdt', 'compusdt', 'crvusdt', 'dogeusdt', 'dotusdt', 
+    'egldusdt', 'ethusdt', 'ksmusdt', 'linkusdt', 'ltcusdt', 'maticusdt',
+    'mkrusdt', 'oneusdt', 'solusdt', 'sxpusdt', 'thetausdt', 'tkousdt', 
+    'uniusdt', 'vetusdt', 'xlmusdt', 'xmrusdt', 'xtzusdt', 'zecusdt'
 }
 
 @click.group()
