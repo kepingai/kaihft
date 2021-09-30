@@ -82,7 +82,7 @@ class KaiRealtimeDatabase(Database):
         # create a separate dictionary 
         # that is within the format of real-time-database
         for key, value in data.items():
-            if not isinstance(value, (str, bool, float, int)):
+            if not isinstance(value, (str, bool, float, int, dict)):
                 _data[key] = value.to_dict()
             else: _data[key] = value
         return _data
