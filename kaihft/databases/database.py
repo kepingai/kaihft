@@ -76,6 +76,29 @@ class KaiRealtimeDatabase(Database):
         _data = self.clean_up(data)
         return db.reference(reference).update(_data)
     
+    def listen(self, reference: str, callback: callable) -> db.ListenerRegistration:
+        """ Will subscribe to specific path asynchronously. 
+
+            Warning
+            -------
+            Only use this for small size data. Also this
+            event fires every hour and dumps the entire
+            child data referenced to it. 
+
+            Parameters
+            ----------
+            reference: `str`
+                The path reference database.
+            callback: `callable`
+                The callback function to call if changes made.
+            
+            Returns
+            -------
+            `db.ListenerRegistration`
+                The listener registration object, close when complete.
+        """
+        return db.reference(reference).listen(callback)
+    
     def clean_up(self, data: dict) -> dict:
         """ Clean up the data formatting for real-time database. """
         _data = {} 

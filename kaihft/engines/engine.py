@@ -82,6 +82,7 @@ class SignalEngine():
         self.ticker_counts = 1
         self.klines_counts = 1
         self.thresholds = self._get_thresholds()
+        self.thresholds_listener = None
         self.strategy = self._get_strategy(strategy, self.thresholds)
     
     def run(self):
@@ -106,7 +107,8 @@ class SignalEngine():
         """
         await asyncio.gather(
             self.subscribe(self.ticker_subscriber, 'ticker', self.update_signals),
-            self.subscribe(self.klines_subscriber, 'klines', self.scout_signals)
+            self.subscribe(self.klines_subscriber, 'klines', self.scout_signals),
+            self.listen_thresholds()
         )
         with self.ticker_subscriber.client, self.klines_subscriber.client:
             try:
@@ -124,11 +126,62 @@ class SignalEngine():
                 self.ticker_subscriber.streaming_pull_future.result()  
                 self.klines_subscriber.streaming_pull_future.result()
                 logging.error(f"Exception caught subscription, Error: {e}")
+            finally:
+                if self.thresholds_listener: self.thresholds_listener.close()
+    
+    async def listen_thresholds(self):
+        """ Will begin subscription to thresholds in database. """
+        self.thresholds_listener = self.database.listen(
+            reference=self.thresholds_ref,
+            callback=self._update_thresholds)
+    
+    def _update_thresholds(self, event):
+        """ The callback to update new thresholds to strategy. 
+
+            Parameters
+            ----------
+            event: `db.Event`
+                This event can access the data, path & event_type
+        """
+        if str(event.event_type) != 'put' or event.data is None: return
+        if str(event.path) != '/': 
+            logging.error("Thresholds not updated! Only update threshold via "
+                f"supervisor's notebook threshold injection!")
+            return
+        thresholds = event.data
+        # ensure that both long and short thresholds in the data
+        if 'long' not in thresholds or 'short' not in thresholds: 
+            logging.error(f"Thresholds required `long` and `short`, instead got: {thresholds.keys()}")
+            return
+        # ensure that bet threshold and ttp threshold in the data
+        for dir, threshold in thresholds.items():
+            if 'bet_threshold' not in threshold or 'ttp_threshold' not in threshold:
+                logging.error(f"Missing `bet_threshold` and/or `ttp_threshold` "
+                    f", instead got: {threshold}, direction: {dir}")
+                return
+        # update the strategy's with new thresholds
+        logging.info(f"[listen] retrieving-new-thresholds from signal database.")
+        self.strategy.long_spread = thresholds['long']['bet_threshold']
+        self.strategy.long_ttp = thresholds['long']['ttp_threshold']
+        self.strategy.short_spread= thresholds['short']['bet_threshold']
+        self.strategy.short_ttp = thresholds['short']['ttp_threshold']
+        logging.info(f"[listen] updated-strategy-new-thresholds: {thresholds}")
     
     async def subscribe(self,
                         subscriber: KaiSubscriberClient,
                         subscription: str,
                         callback: callable):
+        """ Will begin subscription to Cloud Pub/Sub.
+
+            Parameters
+            ----------
+            subscriber: `KaiSubscriberClient`
+                A subscription client to listen to messages.
+            subscription: `str`
+                `ticker` or `klines` topic subscription.
+            callback: `callable`
+                The callback function to handle messages.
+        """
         # start subscription path and futures
         subscriber.subscribe(
             subscription_id=self.subscriptions_params[subscription]['id'],
