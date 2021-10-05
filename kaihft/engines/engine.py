@@ -203,7 +203,7 @@ class SignalEngine():
             # get the symbol
             symbol = message.attributes.get("symbol")
             # only accept messages within 1 seconds latency
-            if seconds_passed <= 1:
+            if seconds_passed <= 1 and seconds_passed >= 0:
                 if symbol in self.signals and self.signals[symbol].is_open():
                     # begin update to signal object
                     last_price = json.loads(message.data
@@ -233,7 +233,7 @@ class SignalEngine():
             seconds_passed = (datetime.utcnow() - message_time).total_seconds()
             symbol = message.attributes.get("symbol")
             # only accept messages within 1 seconds latency
-            if seconds_passed <= 1:
+            if seconds_passed <= 1 and seconds_passed >= 0:
                 # get the symbol of the klines
                 base = message.attributes.get('base')
                 quote = message.attributes.get('quote')
