@@ -197,15 +197,17 @@ class SignalEngine():
             message: `pubsub_v1.subscriber.message.Message`
                 The message from Cloud pub/sub.
         """
-        if message.attributes:
-            # retrieve and decode the full data
-            data = json.loads(message.data.decode('utf-8'))['data']
-            ticker_time = datetime.utcfromtimestamp(data['timestamp']/1000)
-            seconds_passed = (datetime.utcnow() - ticker_time).total_seconds()
+        if message.attributes and 'timestamp' in message.attributes:
+            # get the attributes of the message
             symbol = message.attributes.get("symbol")
+            timestamp = int(message.attributes.get("timestamp"))
+            ticker_time = datetime.utcfromtimestamp(timestamp / 1000)
+            seconds_passed = (datetime.utcnow() - ticker_time).total_seconds()
             # only accept data below 1 seconds latency
             if seconds_passed <= 1 and seconds_passed >= 0:
                 if symbol in self.signals and self.signals[symbol].is_open():
+                    # retrieve and decode the full data
+                    data = json.loads(message.data.decode('utf-8'))['data']
                     # begin update to signal object
                     last_price = data['last_price']
                     # update signal with the lastest price
@@ -228,10 +230,12 @@ class SignalEngine():
             message: `pubsub_v1.subscriber.message.Message`
                 The message from Cloud pub/sub.
         """
-        if message.attributes:
-            message_time = datetime.utcfromtimestamp(message.publish_time.timestamp())
-            seconds_passed = (datetime.utcnow() - message_time).total_seconds()
+        if message.attributes and 'timestamp' in message.attributes:
+            # get the attributes of the message
             symbol = message.attributes.get("symbol")
+            timestamp = int(message.attributes.get("timestamp"))
+            klines_time = datetime.utcfromtimestamp(timestamp / 1000)
+            seconds_passed = (datetime.utcnow() - klines_time).total_seconds()
             # only accept messages within 1 seconds latency
             if seconds_passed <= 1 and seconds_passed >= 0:
                 # get the symbol of the klines

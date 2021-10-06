@@ -163,7 +163,8 @@ class BinanceTickerPublisher(BaseTickerKlinesPublisher):
                     attributes=dict(
                         base=base,
                         quote=quote,
-                        symbol=data['symbol']))
+                        symbol=data['symbol'],
+                        timestamp=str(data["timestamp"])))
             count += 1
             if count % self.log_every == 0:
                 logging.info(self.websocket.print_summary(disable_print=True))
@@ -323,7 +324,8 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
                     attributes=dict(
                         base=base,
                         quote=quote,
-                        symbol=symbol))
+                        symbol=symbol,
+                        timestamp=str(stream['data']["E"])))
             count += 1
             if count % self.log_every == 0:
                 logging.info(self.websocket.print_summary(disable_print=True))
