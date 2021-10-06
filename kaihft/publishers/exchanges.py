@@ -51,20 +51,17 @@ class BaseTickerKlinesPublisher():
             exchange=self.name,
             symbol=data["s"],
             timestamp=int(data["E"]),
-            price_change=float(data["p"]),
-            price_change_percent=float(data["P"]),
-            first_trade_price=float(data.get("x")) if data.get("x") else None,
-            last_price=float(data["c"]),
-            last_quantity=float(data["Q"]),
-            best_bid_price=float(data.get("b")) if data.get("b") else None,
-            best_bid_quantity=float(data.get("B")) if data.get("B") else None,
-            best_ask_price=float(data.get("a")) if data.get("a") else None,
-            best_ask_quantity=float(data.get("A")) if data.get("A") else None,
-            open_price=float(data["o"]),
-            high_price=float(data["h"]),
-            low_price=float(data["l"]),
-            total_traded_base_asset_volume=float(data["v"]),
-            total_traded_quote_asset_volume=float(data["q"]))
+            interval=data["k"]["i"],
+            open_price=float(data["k"]["o"]),
+            last_price=float(data["k"]["c"]),
+            high_price=float(data["k"]["h"]),
+            low_price=float(data["k"]["l"]),
+            base_asset_volume=float(data["k"]["v"]),
+            number_of_trades=float(data["k"]["n"]),
+            is_closed=data["k"]["x"],
+            quote_asset_volume=float(data["k"]["q"]),
+            taker_buy_base_asset_volume=float(data["k"]["V"]),
+            taker_buy_quote_asset_volume=float(data["k"]["Q"]))
 
     def format_binance_kline_to_dict(self, data) -> Tuple[dict, bool]:
         """ Will format binance kline websocket data to dictionary. 

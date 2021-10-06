@@ -198,21 +198,21 @@ class SignalEngine():
                 The message from Cloud pub/sub.
         """
         if message.attributes:
-            message_time = datetime.utcfromtimestamp(message.publish_time.timestamp())
-            seconds_passed = (datetime.utcnow() - message_time).total_seconds()
-            # get the symbol
+            # retrieve and decode the full data
+            data = json.loads(message.data.decode('utf-8'))['data']
+            ticker_time = datetime.utcfromtimestamp(data['timestamp']/1000)
+            seconds_passed = (datetime.utcnow() - ticker_time).total_seconds()
             symbol = message.attributes.get("symbol")
-            # only accept messages within 1 seconds latency
+            # only accept data below 1 seconds latency
             if seconds_passed <= 1 and seconds_passed >= 0:
                 if symbol in self.signals and self.signals[symbol].is_open():
                     # begin update to signal object
-                    last_price = json.loads(message.data
-                        .decode('utf-8'))['data']['last_price']
+                    last_price = data['last_price']
                     # update signal with the lastest price
                     self.signals[symbol].update(last_price)
             if self.ticker_counts % self.log_every == 0:
                 logging.info(f"[ticker] cloud pub/sub messages running, "
-                    f"latency: {seconds_passed}s, last-symbol: {symbol}")
+                    f"latency: {seconds_passed} sec, last-symbol: {symbol}")
                 # reset the signal counts to 1
                 self.ticker_counts = 1
             # add the counter for each message received
@@ -248,7 +248,7 @@ class SignalEngine():
                     self.run_strategy(base, quote, symbol, klines)
             if self.klines_counts % self.log_every == 0:
                 logging.info(f"[klines] cloud pub/sub messages running, "
-                    f"latency: {seconds_passed}s, last-symbol: {symbol}")
+                    f"latency: {seconds_passed} sec, last-symbol: {symbol}")
                 # reset the signal counts to 1
                 self.klines_counts = 1
             # add the counter for each message received

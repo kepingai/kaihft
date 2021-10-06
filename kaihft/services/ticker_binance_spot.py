@@ -27,7 +27,7 @@ def main(
     # binance only allows 1024 subscriptions in one stream
     # channels and markets and initiate multiplex stream
     # channels x markets = (total subscription)
-    channels = {'ticker'}
+    channels = {'kline_1m'}
     # connect to binance.com and create the stream
     # the stream id is returned after calling `create_stream()`
     binance_websocket_api_manager = BinanceWebSocketApiManager(
