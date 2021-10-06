@@ -33,8 +33,8 @@ class BaseTickerKlinesPublisher():
         self.topic_path = topic_path
         self.log_every = log_every
         self.quotes = quotes
-        logging.info(f"ticker publisher initialized {self.name}, {self.websocket}, "
-            f"from: {self.stream_id}, to: {self.topic_path}, will log update every: {self.log_every} messages.")
+        logging.info(f"[init] ticker publisher initialized {self.name}, {self.websocket}, "
+            f"from: {self.stream_id}, to: {self.topic_path}, log update every: {self.log_every} messages.")
     
     def format_binance_ticker_to_dict(self, data) -> dict:
         """ Will format binance ticker websocket data to dictionary. 
@@ -250,9 +250,9 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
                 datetime.utcnow().minute % _interval == 0 else KlineStatus.OPEN)
             # if all successful calculate the
             # the overall execution time and delay if needed
-            logging.info(f"initialized klines: {market}-{interval} - duration: {time.time() - start} seconds")
+            logging.info(f"[init] initialized klines: {market}-{interval} - with duration: {time.time() - start} seconds")
             self.delay(start)
-        logging.info(f"successful kline initializations: {self.markets}-{interval}")
+        logging.info(f"[init] successful kline initializations: {self.markets}-{interval}")
         return markets_klines, kline_status
 
     def to_dataframe(self, symbol: str, interval: str, klines: list) -> pd.DataFrame:
