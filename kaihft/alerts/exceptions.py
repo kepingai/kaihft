@@ -1,0 +1,1 @@
+class RestartPodException(Exception): pass

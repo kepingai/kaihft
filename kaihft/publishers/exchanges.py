@@ -5,6 +5,7 @@ from .client import KaiPublisherClient
 from enum import Enum
 from typing import Tuple
 from datetime import datetime, timedelta
+from kaihft.alerts import RestartPodException
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 from unicorn_binance_websocket_api.unicorn_binance_websocket_api_manager import BinanceWebSocketApiManager
@@ -143,13 +144,17 @@ class BinanceTickerPublisher(BaseTickerKlinesPublisher):
             it to the topic specified during initialization.
         """
         count = 0
+        start = time.time()
         while True:
             # binance spot will only allow 24h max stream
             # connection, this will automatically close the script
-            if self.websocket.is_manager_stopping(): exit(0)
+            # if the last message published was above 30s ago, raise exception
+            last_published = time.time() - start
+            if self.websocket.is_manager_stopping() or last_published >= 30: 
+                raise RestartPodException(f"Websocket manager stopped, last message "
+                    f"published: {round(last_published, 2)} seconds ago, restart pod!")
             # get and remove the oldest entry from the `stream_buffer` stack
             oldest_stream_data_from_stream_buffer = self.websocket.pop_stream_data_from_stream_buffer()
-            # print the stream data from stream buffer
             if oldest_stream_data_from_stream_buffer is False: time.sleep(0.01)
             else:
                 stream = json.loads(oldest_stream_data_from_stream_buffer)
@@ -165,6 +170,8 @@ class BinanceTickerPublisher(BaseTickerKlinesPublisher):
                         quote=quote,
                         symbol=data['symbol'],
                         timestamp=str(data["timestamp"])))
+                # restart the time
+                start = time.time()
             count += 1
             if count % self.log_every == 0:
                 logging.info(self.websocket.print_summary(disable_print=True))
@@ -297,10 +304,15 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
             it to the topic specified during initialization.
         """
         count = 0
+        start = time.time()
         while True:
             # binance spot will only allow 24h max stream
             # connection, this will automatically close the script
-            if self.websocket.is_manager_stopping(): exit(0)
+            # if the last message published was above 30s ago, raise exception
+            last_published = time.time() - start
+            if self.websocket.is_manager_stopping() or last_published >= 30: 
+                raise RestartPodException(f"Websocket manager stopped, last message "
+                    f"published: {round(last_published, 2)} seconds ago, restart pod!")
             # get and remove the oldest entry from the `stream_buffer` stack
             oldest_stream_data_from_stream_buffer = self.websocket.pop_stream_data_from_stream_buffer()
             # print the stream data from stream buffer
@@ -326,6 +338,8 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
                         quote=quote,
                         symbol=symbol,
                         timestamp=str(stream['data']["E"])))
+                # restart the time
+                start = time.time()
             count += 1
             if count % self.log_every == 0:
                 logging.info(self.websocket.print_summary(disable_print=True))

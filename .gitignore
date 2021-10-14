@@ -13,3 +13,4 @@ dist
 setup.py
 # cache
 __pycache__ 
+tmp

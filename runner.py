@@ -46,8 +46,8 @@ def klines_binance_spot(klines, production):
 @cli.command()
 @click.option('--strategy', default="STS", help="available strategies: 'STS'")
 @click.option('--version', default='v0', help="the version of signal engine.")
-@click.option('--log-every', default=500, help="log cloud pub/sub messages every.")
-@click.option('--log-metrics-every', default=50, help="log layer2 metrics every.")
+@click.option('--log-every', default=1000, help="log cloud pub/sub messages every.")
+@click.option('--log-metrics-every', default=100, help="log layer2 metrics every.")
 @click.option('--production', is_flag=True, help='publish & subscribe messages to production topic.')
 @notify_failure
 def signal_binance_spot(strategy, version, log_every, log_metrics_every, production):
