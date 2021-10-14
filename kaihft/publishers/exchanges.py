@@ -152,7 +152,7 @@ class BinanceTickerPublisher(BaseTickerKlinesPublisher):
             last_published = time.time() - start
             if self.websocket.is_manager_stopping() or last_published >= 30: 
                 raise RestartPodException(f"Websocket manager stopped, last message "
-                    f"published: {round(last_published, 2)} seconds ago, restart pod!")
+                    f"published: {round(last_published, 2)} seconds ago, restarting pod!")
             # get and remove the oldest entry from the `stream_buffer` stack
             oldest_stream_data_from_stream_buffer = self.websocket.pop_stream_data_from_stream_buffer()
             if oldest_stream_data_from_stream_buffer is False: time.sleep(0.01)
@@ -312,7 +312,7 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
             last_published = time.time() - start
             if self.websocket.is_manager_stopping() or last_published >= 30: 
                 raise RestartPodException(f"Websocket manager stopped, last message "
-                    f"published: {round(last_published, 2)} seconds ago, restart pod!")
+                    f"published: {round(last_published, 2)} seconds ago, restarting pod!")
             # get and remove the oldest entry from the `stream_buffer` stack
             oldest_stream_data_from_stream_buffer = self.websocket.pop_stream_data_from_stream_buffer()
             # print the stream data from stream buffer

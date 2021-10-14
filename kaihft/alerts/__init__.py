@@ -25,17 +25,19 @@ def notify_failure(fn: callable):
             # get the class filename and the specific
             # line that causes this exception 
             exc_type, _, exc_tb = sys.exc_info()
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            origin = (f"Class: {exc_type}, Filename: {fname}, "
+                f"Line: {exc_tb.tb_lineno}")
             # if explicit restart pod exception is raised
             # delete the health path to trigger liveness probe to restart pod
             if exc_type == RestartPodException:
                 if os.path.exists(health_path): os.remove(health_path)
+                level = AlertLevel.INFO
             # else if the exception raise is not meant
             # for restarting the pod, send error to slack
-            else:
-                fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-                origin = (f"Class: {exc_type}, Filename: {fname}, "
-                    f"Line: {exc_tb.tb_lineno}")
-                alert_slack(origin=origin, message=str(error), level=AlertLevel.ERROR)
+            else: level = AlertLevel.ERROR
+            # send the alert to slack with its specific level
+            alert_slack(origin=origin, message=str(error), level=level)
             # raise the error
             raise error
     return wrapper
