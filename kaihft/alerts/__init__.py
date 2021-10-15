@@ -32,12 +32,11 @@ def notify_failure(fn: callable):
             # delete the health path to trigger liveness probe to restart pod
             if exc_type == RestartPodException:
                 if os.path.exists(health_path): os.remove(health_path)
-                level = AlertLevel.INFO
             # else if the exception raise is not meant
             # for restarting the pod, send error to slack
-            else: level = AlertLevel.ERROR
-            # send the alert to slack with its specific level
-            alert_slack(origin=origin, message=str(error), level=level)
+            else:
+                # send the alert to slack with its specific level
+                alert_slack(origin=origin, message=str(error), level=AlertLevel.ERROR)
             # raise the error
             raise error
     return wrapper
