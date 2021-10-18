@@ -12,12 +12,13 @@ __MARKETS = {
     '1inchusdt','aaveusdt', 'adausdt', 'algousdt', 'atomusdt', 
     'audiousdt', 'avaxusdt', 'batusdt', 'bnbusdt', 'btcusdt', 
     'compusdt', 'crvusdt', 'dogeusdt', 'dotusdt', 'egldusdt', 
-    'enjusdt', 'ethusdt', 'ftmusdt', 'iotausdt' 'ksmusdt', 
-    'linkusdt', 'ltcusdt', 'lunausdt', 'maticusdt', 'mkrusdt', 
+    'enjusdt', 'ethusdt', 'ftmusdt', 'grtusdt', 'hbarusdt', 
+    'icxusdt' 'iotausdt' 'ksmusdt', 'linkusdt', 'ltcusdt', 
+    'lunausdt', 'manausdt', 'maticusdt', 'mkrusdt', 'nearusdt',
     'neousdt', 'oneusdt', 'qntusdt', 'runeusdt', 'solusdt', 
-    'sxpusdt', 'thetausdt', 'tkousdt', 'uniusdt', 'vetusdt', 
-    'xlmusdt', 'xmrusdt', 'xrpusdt', 'xtzusdt', 'wavesusdt', 
-    'zecusdt', 'zilusdt','zrxusdt'
+    'stxusdt','sxpusdt', 'thetausdt', 'tkousdt', 'uniusdt', 
+    'vetusdt', 'xlmusdt', 'xmrusdt', 'xrpusdt', 'xtzusdt', 
+    'wavesusdt', 'zecusdt', 'zilusdt','zrxusdt'
 }
 
 @click.group()
