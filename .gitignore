@@ -1,5 +1,3 @@
-# ignore testing files
-test*
 # ignore any environment files
 *env*
 # ignore log
@@ -12,5 +10,6 @@ dist
 *egg-info
 setup.py
 # cache
-__pycache__ 
+__pycache__/
 tmp
+*.pyc
