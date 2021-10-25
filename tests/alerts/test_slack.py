@@ -8,4 +8,3 @@ def test_alert_slack():
     alert_slack(origin="kaihft_testing_module",
         message="testing slack debug notif",
         level=AlertLevel.INFO)
-    

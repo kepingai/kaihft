@@ -15,6 +15,42 @@ class SignalStatus(Enum):
         return str(self.value)
 
 class Signal():
+    """ A signal class that embodies a trigger generated from
+        layer 1 & layer interaction.
+
+        Parameters
+        ----------
+        base: `str`
+            The base symbol.
+        quote: `str`
+            The quote symbol.
+        take_profit: `float`
+            The take profit in percentage.
+        spread: `float`
+            The spread predicted from layer 2.
+        purchase_price: `float`
+            The price signal was entered.
+        last_price: `float`
+            The last price when entered.
+        direction: `int`
+            The direction of signal 1 = long, 0 = short.
+        callback: `callable`
+            A callback function to call if signal closed.
+        n_tick_forward: `int`
+            The n tick forward signal expected to close.
+        buffer: `int`
+            The buffer n tick forward.
+        realized_profit: `float`
+            The realized profit after signal closed.
+        id: `str`
+            The unique id.
+        created_at: `int`
+            The UTC timestamp of signal creation.
+        expired_at: `int`
+            The UTC timestamp signal to be expired.
+        status: `SignalStatus`
+            The current status.
+    """
     def __init__(self,
                  base: str,
                  quote: str,
