@@ -108,7 +108,7 @@ class SignalEngine():
         await asyncio.gather(
             self.subscribe(self.ticker_subscriber, 'ticker', self.update_signals),
             self.subscribe(self.klines_subscriber, 'klines', self.scout_signals),
-            self.listen_thresholds()
+            self.listen_thresholds(self._update_thresholds)
         )
         with self.ticker_subscriber.client, self.klines_subscriber.client:
             try:
@@ -129,11 +129,17 @@ class SignalEngine():
             finally:
                 if self.thresholds_listener: self.thresholds_listener.close()
     
-    async def listen_thresholds(self):
-        """ Will begin subscription to thresholds in database. """
+    async def listen_thresholds(self, callback: callable):
+        """ Will begin subscription to thresholds in database. 
+
+            Parameters
+            ----------
+            callback: `callable`
+                A function to callback to listen events.
+        """
         self.thresholds_listener = self.database.listen(
             reference=self.thresholds_ref,
-            callback=self._update_thresholds)
+            callback=callback)
     
     def _update_thresholds(self, event):
         """ The callback to update new thresholds to strategy. 
@@ -170,24 +176,27 @@ class SignalEngine():
     async def subscribe(self,
                         subscriber: KaiSubscriberClient,
                         subscription: str,
-                        callback: callable):
+                        callback: callable,
+                        single_stream: bool = False):
         """ Will begin subscription to Cloud Pub/Sub.
 
             Parameters
             ----------
             subscriber: `KaiSubscriberClient`
-                A subscription client to listen to messages.
+                A subscription client to listen to messages.`
             subscription: `str`
                 `ticker` or `klines` topic subscription.
             callback: `callable`
                 The callback function to handle messages.
+            single_stream: `bool`
+                True if the whole engine is meant to subscribe in singular topic only.
         """
         # start subscription path and futures
         subscriber.subscribe(
             subscription_id=self.subscriptions_params[subscription]['id'],
             timeout=self.subscriptions_params[subscription]['timeout'],
             callback=callback,
-            single_stream=False)
+            single_stream=single_stream)
             
     def update_signals(self, message: pubsub_v1.subscriber.message.Message):
         """ Update signals with the most recent data. 
