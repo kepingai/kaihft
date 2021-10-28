@@ -4,18 +4,23 @@ from firebase_admin import db
 
 class Database():
     def __init__(self):
+        """ A base abstract database class. """
         self.id = str(uuid.uuid4())
     @abstractmethod
-    def get(self, reference: str):
+    def get(self):
+        """ Abstract method that retrieves data. """
         raise NotImplementedError()
     @abstractmethod
-    def update(self, reference: str, data: dict):
+    def update(self):
+        """ Abstract method that updates data. """
         raise NotImplementedError()
     @abstractmethod
-    def set(self, reference: str, data: dict):
+    def set(self):
+        """ Abstract method that sets data. """
         raise NotImplementedError()
     @abstractmethod
-    def clean_up(self, data: dict) -> dict:
+    def clean_up(self, data: dict) -> any:
+        """ Abstract method that cleans up data. """
         raise NotImplementedError()
 
 class KaiRealtimeDatabase(Database):
