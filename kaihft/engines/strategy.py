@@ -101,15 +101,31 @@ class Strategy():
                 total_execution_time=execution_time)
 
 class SuperTrendSqueeze(Strategy):
+    """ SuperTrend Squeeze strategy implementation
+        will scout for potential actionable
+        intelligence based on a specific market behavior. 
+    """
     def __init__(self, 
                 long_spread: float,
                 long_ttp: float,
                 short_spread: float,
                 short_ttp: float,
                 log_every: int):
-        """ SuperTrend Squeeze strategy implementation
-            will scout for potential actionable
-            intelligence based on a specific market behavior. 
+        """ Initialize SuperTrendSqueeze class with specified spread & take profit
+            percentage thresholds.
+
+            Parameters
+            ----------
+            long_spread: `float`
+                The longing spread required from layer 2 prediction.
+            long_ttp: `float`
+                The long signal take profit percentage to take from the signal.
+            short_spread: `float`
+                The shorting spread required from layer 2 prediction.
+            short_ttp: `float`
+                The short signal take profit percentage to take from the signal.
+            log_every: `int`
+                Log the metrics from layer 2 every n-iteration.
         """
         super().__init__(
             name="SUPERTREND_SQUEEZE", 
@@ -155,17 +171,17 @@ class SuperTrendSqueeze(Strategy):
               quote: str,
               dataframe: pd.DataFrame, 
               callback: callable) -> Union[Signal, None]:
-        """ Will scout for potential market trigger from  
-            SuperTrend and Momentum Squeeze, if triggered
-            run spread and direction forecast from Layer 2.
+        """ Will scout for potential market trigger from  SuperTrend and 
+            Momentum Squeeze, if triggered run spread and direction forecast 
+            from Layer 2.
 
             Note
             ----
-            Signal will be created if technical analysis 
+            *Signal will be created if technical analysis 
             is triggered and a "green light" given from Layer 2.
             In this specific strategy, Layer 2's forecasted 
             potential spread in the next n-tick interval and 
-            direction would be the final decision mechanism.
+            direction would be the final decision mechanism.*
 
             Parameters
             ----------
@@ -243,7 +259,7 @@ __REGISTRY = {
 }
 
 def get_strategy(id: str) -> Union[Strategy, None]:
-    """ Will retrieve the strategy class from string_id 
+    """ A helper function that will retrieve the strategy class from `string_id` 
         
         Parameters
         ----------

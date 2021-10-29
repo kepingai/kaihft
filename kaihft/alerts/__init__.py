@@ -1,3 +1,11 @@
+"""
+    This module defines our alert system through *wrapper* function(s).
+
+    Any exceptions caught will be sent to:
+    - `Slack`: A dedicated channel will be notified.
+    - `Logging`: system in deployed Kubernetes Cluster.
+"""
+
 import os, sys
 from .alert import *
 from .slack import *

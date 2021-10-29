@@ -16,40 +16,7 @@ class SignalStatus(Enum):
 
 class Signal():
     """ A signal class that embodies a trigger generated from
-        layer 1 & layer interaction.
-
-        Parameters
-        ----------
-        base: `str`
-            The base symbol.
-        quote: `str`
-            The quote symbol.
-        take_profit: `float`
-            The take profit in percentage.
-        spread: `float`
-            The spread predicted from layer 2.
-        purchase_price: `float`
-            The price signal was entered.
-        last_price: `float`
-            The last price when entered.
-        direction: `int`
-            The direction of signal 1 = long, 0 = short.
-        callback: `callable`
-            A callback function to call if signal closed.
-        n_tick_forward: `int`
-            The n tick forward signal expected to close.
-        buffer: `int`
-            The buffer n tick forward.
-        realized_profit: `float`
-            The realized profit after signal closed.
-        id: `str`
-            The unique id.
-        created_at: `int`
-            The UTC timestamp of signal creation.
-        expired_at: `int`
-            The UTC timestamp signal to be expired.
-        status: `SignalStatus`
-            The current status.
+        layer 1 & layer 2 interaction.
     """
     def __init__(self,
                  base: str,
@@ -67,6 +34,41 @@ class Signal():
                  created_at: int = None,
                  expired_at: int = None,
                  status: SignalStatus = SignalStatus.NEW):
+        """ Initializing a signal class.
+
+            Parameters
+            ----------
+            base: `str`
+                The base symbol.
+            quote: `str`
+                The quote symbol.
+            take_profit: `float`
+                The take profit in percentage.
+            spread: `float`
+                The spread predicted from layer 2.
+            purchase_price: `float`
+                The price signal was entered.
+            last_price: `float`
+                The last price when entered.
+            direction: `int`
+                The direction of signal 1 = long, 0 = short.
+            callback: `callable`
+                A callback function to call if signal closed.
+            n_tick_forward: `int`
+                The n tick forward signal expected to close.
+            buffer: `int`
+                The buffer n tick forward.
+            realized_profit: `float`
+                The realized profit after signal closed.
+            id: `str`
+                The unique id.
+            created_at: `int`
+                The UTC timestamp of signal creation.
+            expired_at: `int`
+                The UTC timestamp signal to be expired.
+            status: `SignalStatus`
+                The current status.
+        """
         self.id = id if id else str(uuid.uuid4())
         self.base = base
         self.quote = quote
@@ -93,6 +95,7 @@ class Signal():
     
     @property
     def status(self) -> SignalStatus:
+        """ The real-time status of the signal. """
         return self._status
 
     def open(self):
@@ -105,8 +108,10 @@ class Signal():
         self.callback(self)
     
     def is_open(self) -> bool:
-        """ Returns
-            ------- 
+        """ Check if signal is still open.
+        
+            Returns
+            -------
             `bool` 
                 Returns `True` if signal is still open.
         """
@@ -121,8 +126,8 @@ class Signal():
             last_price: `float`
                 The last price of the ticker.
             
-            Return
-            ------
+            Returns
+            -------
             `SignalStatus`
                 Will return the update status of the signal.
         """

@@ -46,34 +46,36 @@ def predict(base: str, quote: str, data: dict) -> Union[dict, None]:
             The quote symbol of the ticker.
         data: `dict`
             A dictionary of klines lists data.
+        
+        Example
+        -------
+        Acceptable keys in `data` dictionary
+        >>> [
+        ...    'open', 'high', 'low', 'close', 'volume', 'close_time',
+        ...    'quote_asset_volume','number_of_trades','taker_buy_asset_vol',
+        ...    'taker_buy_quote_vol','datetime','ticker','interval', 'timeframe
+        ... ]
             
-        Acceptable keys in data dictionary
-        [
-            'open', 'high', 'low', 'close', 'volume', 'close_time',
-            'quote_asset_volume','number_of_trades','taker_buy_asset_vol',
-            'taker_buy_quote_vol','datetime','ticker','interval', 'timeframe
-        ]
-            
-        ..code-block:: python
-        {
-            "instances": {
-                "data": {
-                    'close': [
-                        2.924000024795532,
-                        2.969899892807007,
-                        2.9554998874664307,
-                        ...
-                    ],
-                    ...
-                    'high': [
-                        2.9398000240325928,
-                        2.970000028610229,
-                        2.97189998626709,
-                    ],
-                    ...
-                }
-            }
-        }
+        `data` should be formatted as follows
+        >>> {
+        ...    "instances": {
+        ...        "data": {
+        ...            'close': [
+        ...                2.924000024795532,
+        ...                2.969899892807007,
+        ...                2.9554998874664307,
+        ...                ...
+        ...            ],
+        ...            ...
+        ...            'high': [
+        ...                2.9398000240325928,
+        ...                2.970000028610229,
+        ...                2.97189998626709,
+        ...            ],
+        ...            ...
+        ...        }
+        ...    }
+        ... }
 
         Returns
         -------
@@ -81,18 +83,19 @@ def predict(base: str, quote: str, data: dict) -> Union[dict, None]:
             A dictionary containing forecasted percentage spread
             of n-tick forward and the direction.
 
-        .. code-block:: python
-        {
-            'base': 'UNI',                                      # base symbol
-            'interval': '15m',                                  # interval of symbol
-            'predictions': {        
-                'direction': 0,                                 # 1 = long and 0 = short
-                'n_tick_forward': 8,                            # forecasted n forward
-                'percentage_spread': 0.16193726658821106        # spread in percentage
-            },
-            'success': True,                                    # validator    
-            'timestamp': 1631646484.79271                       # utc timestamp
-        }
+        Example
+        -------
+        >>> {
+        ...    'base': 'UNI',                                # base symbol
+        ...    'interval': '15m',                            # interval of symbol
+        ...    'predictions': {        
+        ...        'direction': 0,                           # 1 = long and 0 = short
+        ...        'n_tick_forward': 8,                      # forecasted n forward
+        ...        'percentage_spread': 0.16193726658821106  # spread in percentage
+        ...    },
+        ...    'success': True,                              # validator    
+        ...    'timestamp': 1631646484.79271                 # utc timestamp
+        ... }
     """
     job_id = "0A"
     base_url = "https://us-central1-keping-ai-continuum.cloudfunctions.net/predict_15m"

@@ -3,8 +3,9 @@ import firebase_admin, uuid
 from firebase_admin import db    
 
 class Database():
+    """ A base abstract database class. """
     def __init__(self):
-        """ A base abstract database class. """
+        """ Will initialize a uuid. """
         self.id = str(uuid.uuid4())
     @abstractmethod
     def get(self):
@@ -24,13 +25,24 @@ class Database():
         raise NotImplementedError()
 
 class KaiRealtimeDatabase(Database):
+    """ This class handles read/write to KepingAI's
+        real-time database. 
+            
+        Note 
+        ----
+        *This database's usage is purely meant to save small-medium
+        states of data. This is not a usage for archiving database.*
+    """
     def __init__(self,
                  database_url: str = 'https://keping-ai-continuum-default-rtdb.firebaseio.com/'):
-        """ This class handles read/write to KepingAI's
-            real-time databases. Note: this database's
-            usage is purely meant to save small-medium
-            states of data. This is not a usage for archiving
-            database.
+        """
+            A dedicated real-time database is created for both dev and prod usage.
+            All CRUD services is conducted through this class.
+
+            Parameters
+            ----------
+            database_url: `str`
+                The url to the real-time database, default is link spe
         """
         super().__init__()
         self.database_url = database_url
@@ -85,10 +97,10 @@ class KaiRealtimeDatabase(Database):
         """ Will subscribe to specific path asynchronously. 
 
             Warning
-            -------
-            Only use this for small size data. Also this
+            --------
+            *Only use this for small size data. Also this
             event fires every hour and dumps the entire
-            child data referenced to it. 
+            child data referenced to it.*
 
             Parameters
             ----------
@@ -105,7 +117,18 @@ class KaiRealtimeDatabase(Database):
         return db.reference(reference).listen(callback)
     
     def clean_up(self, data: dict) -> dict:
-        """ Clean up the data formatting for real-time database. """
+        """ Clean up the data formatting for real-time database. 
+
+            Parameters
+            ----------
+            data: `dict`
+                The raw data to be formatted correctly.
+            
+            Returns
+            -------
+            `dict`
+                Casted data to specific real-time database format.
+        """
         _data = {} 
         # create a separate dictionary 
         # that is within the format of real-time-database

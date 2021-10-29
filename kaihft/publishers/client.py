@@ -2,10 +2,19 @@ import json
 from google.cloud.pubsub import PublisherClient
 
 class KaiPublisherClient():
+    """ A publisher Cloud Pub/Sub client. """
     def __init__(self, 
                  username: str = 'service-account-kft',
                  project_id: str = 'keping-ai-continuum'):
-        """ Publishing messages are handeled here."""
+        """ Publishing messages are handeled here. 
+
+            Parameters
+            ----------
+            username: `str`
+                Username when publishing messages.
+            project_id: `str`
+                The project sending it from.
+        """
         self.client = PublisherClient()
         self.username = username
         self.project_id = project_id

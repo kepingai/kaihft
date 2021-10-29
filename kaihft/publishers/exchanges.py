@@ -18,6 +18,7 @@ class KlineStatus(Enum):
         return str(self.value)
 
 class BaseTickerKlinesPublisher():
+    """ Base ticker publisher subclass. """
     def __init__(self, 
                  name: str,
                  websocket: any,
@@ -26,7 +27,26 @@ class BaseTickerKlinesPublisher():
                  topic_path: str,
                  quotes: list,
                  log_every: int = 100000):
-        """ Base ticker publisher subclass. """
+        """ A helper class with helper functions for publishing ticker & 
+            klines messages. 
+
+            Parameters
+            ----------
+            name: `str`
+                The name of the publisher
+            websocket: `any`
+                The websocket manager.
+            stream_id: `any`
+                The id of the stream.
+            publisher: `KaiPublisherClient`
+                The cloud pub/sub publisher.
+            topic_path: `str`
+                The topic to publish messages to
+            quotes: `list`
+                The cryptocurrency quotes to listen to.
+            log_every: `int`
+                Log ticker and klines every n-iteration.
+        """
         self.name = name
         self.websocket = websocket
         self.stream_id = stream_id
@@ -114,6 +134,7 @@ class BaseTickerKlinesPublisher():
             f"is not applicable to signal engine!")
 
 class BinanceTickerPublisher(BaseTickerKlinesPublisher):
+    """ Binance ticker publisher class."""
     def __init__(self, 
             websocket: BinanceWebSocketApiManager,
             stream_id: str,
@@ -178,6 +199,7 @@ class BinanceTickerPublisher(BaseTickerKlinesPublisher):
                 count = 0
 
 class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
+    """ Binance Klines publisher class. """
     # initialize globals that will be used
     # throughout the exchanges class here.
     __FLOATINGS = [
@@ -263,7 +285,7 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
         return markets_klines, kline_status
 
     def to_dataframe(self, symbol: str, interval: str, klines: list) -> pd.DataFrame:
-        """Will convert klines from binance to dataframe.
+        """ Will convert klines from binance to dataframe.
 
             Parameters
             ----------
@@ -363,23 +385,21 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
 
             Example
             -------
-            .. code-block:: python
-            {
-                'open': [25.989999771118164, 25.920000076293945, 25.920000076293945], 
-                'high': [26.020000457763672, 26.0, 25.96999931335449], 
-                'low': [25.79999923706055, 25.84000015258789, 25.739999771118164], 
-                'close': [25.93000030517578, 25.920000076293945, 25.76000022888184], 
-                'volume': [20038.5703125, 22381.650390625, 12299.23046875], 
-                'quote_asset_volume': [518945.0625, 580255.5, 317816.84375], 
-                'number_of_trades': [733, 759, 619], 
-                'taker_buy_base_vol': [9005.06, 12899.83, 3608.93], 
-                'taker_buy_quote_vol': [233168.995, 334395.2921, 93283.808], 
-                'close_time': [1630031399999, 1630032299999, 1630033199999], 
-                'symbol': ['UNIUSDT', 'UNIUSDT', 'UNIUSDT'], 
-                'timeframe': ['15m', '15m', '15m']
-            }
+            >>> {
+            ...    'open': [25.989999771118164, 25.920000076293945, 25.920000076293945], 
+            ...    'high': [26.020000457763672, 26.0, 25.96999931335449], 
+            ...    'low': [25.79999923706055, 25.84000015258789, 25.739999771118164], 
+            ...    'close': [25.93000030517578, 25.920000076293945, 25.76000022888184], 
+            ...    'volume': [20038.5703125, 22381.650390625, 12299.23046875], 
+            ...    'quote_asset_volume': [518945.0625, 580255.5, 317816.84375], 
+            ...    'number_of_trades': [733, 759, 619], 
+            ...    'taker_buy_base_vol': [9005.06, 12899.83, 3608.93], 
+            ...    'taker_buy_quote_vol': [233168.995, 334395.2921, 93283.808], 
+            ...    'close_time': [1630031399999, 1630032299999, 1630033199999], 
+            ...    'symbol': ['UNIUSDT', 'UNIUSDT', 'UNIUSDT'], 
+            ...    'timeframe': ['15m', '15m', '15m']
+            ... }
         """
-        # TODO: FIX THIS KLINE UPDATE MECHANISM
         # retrieve the specific klines
         # of the specific symbol and status
         status = self.kline_status[symbol]

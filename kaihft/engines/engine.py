@@ -9,6 +9,9 @@ from .strategy import get_strategy, Strategy
 from .signal import init_signal_from_rtd, Signal
 
 class SignalEngine():
+    """ The layer-1 system of KepingAI Signal LSTF. All communication between
+        layer 1 and layer 2 is conducted concurrently in this class.
+    """
     def __init__(
         self,
         database: KaiRealtimeDatabase,
@@ -54,18 +57,17 @@ class SignalEngine():
 
             Example
             -------
-            subscription_params example please follow:
-            .. code-block:: python
-            {
-                "ticker": {
-                    "id": "dev-ticker-binance-spot",
-                    "timeout": None # this means to listen for data indefinitely
-                },
-                "klines": {
-                    "id": "dev-klines-binance-spot",
-                    "timeout": 10 # this means to listen for data for 10s only.
-                }
-            }
+            `subscription_params` example please follow:
+            >>> {
+            ...    "ticker": {
+            ...        "id": "dev-ticker-binance-spot",
+            ...        "timeout": None # this means to listen for data indefinitely
+            ...    },
+            ...    "klines": {
+            ...        "id": "dev-klines-binance-spot",
+            ...        "timeout": 10 # this means to listen for data for 10s only.
+            ...    }
+            ... }
         """
         self.database = database
         self.database_ref = database_ref
@@ -86,7 +88,9 @@ class SignalEngine():
         self.strategy = self._get_strategy(strategy, self.thresholds)
     
     def run(self):
-        """ Will run signal engine concurrently """
+        """ Will run signal engine concurrently, 
+            learn more in `_run()` function in the source code.
+        """
         logging.warn(f"[start] signal engine starts - strategy: {self.strategy}")
         # retrive the most recent signal data from subscriber
         self.signals = self.get_signals()
@@ -285,23 +289,23 @@ class SignalEngine():
             
             Example
             -------
-            .. code-block:: python
-            {
-                "data": {
-                    'open': [25.989999771118164, 25.920000076293945, 25.920000076293945], 
-                    'high': [26.020000457763672, 26.0, 25.96999931335449], 
-                    'low': [25.79999923706055, 25.84000015258789, 25.739999771118164], 
-                    'close': [25.93000030517578, 25.920000076293945, 25.76000022888184], 
-                    'volume': [20038.5703125, 22381.650390625, 12299.23046875], 
-                    'quote_asset_volume': [518945.0625, 580255.5, 317816.84375], 
-                    'number_of_trades': [733, 759, 619], 
-                    'taker_buy_base_vol': [9005.06, 12899.83, 3608.93], 
-                    'taker_buy_quote_vol': [233168.995, 334395.2921, 93283.808], 
-                    'close_time': [1630031399999, 1630032299999, 1630033199999], 
-                    'symbol': ['UNIUSDT', 'UNIUSDT', 'UNIUSDT'], 
-                    'timeframe': ['15m', '15m', '15m']
-                }
-            }
+            Klines data should have all of the listed keys here
+            >>> {
+            ...     "data": {
+            ...         'open': [25.989999771118164, 25.920000076293945, 25.920000076293945], 
+            ...         'high': [26.020000457763672, 26.0, 25.96999931335449], 
+            ...         'low': [25.79999923706055, 25.84000015258789, 25.739999771118164], 
+            ...         'close': [25.93000030517578, 25.920000076293945, 25.76000022888184], 
+            ...         'volume': [20038.5703125, 22381.650390625, 12299.23046875], 
+            ...         'quote_asset_volume': [518945.0625, 580255.5, 317816.84375], 
+            ...         'number_of_trades': [733, 759, 619], 
+            ...         'taker_buy_base_vol': [9005.06, 12899.83, 3608.93], 
+            ...         'taker_buy_quote_vol': [233168.995, 334395.2921, 93283.808], 
+            ...         'close_time': [1630031399999, 1630032299999, 1630033199999], 
+            ...         'symbol': ['UNIUSDT', 'UNIUSDT', 'UNIUSDT'], 
+            ...         'timeframe': ['15m', '15m', '15m']
+            ...     }
+            ... }
         """
         try:
             # will convert klines to dataframe and
