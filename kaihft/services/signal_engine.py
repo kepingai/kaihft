@@ -36,8 +36,9 @@ def main(exchange: str,
         klines_topic_path = f'prod-klines-{exchange}-{version}-sub'
         dist_topic_path = f'prod-distribute-signal-{exchange}-{version}'
         archive_topic_path = f'prod-signal-{exchange}-{version}'
-        database_ref = f"prod/signals"
-        thresholds_ref = f"prod/thresholds"
+        database_ref = "prod/signals"
+        thresholds_ref = "prod/thresholds"
+        pairs_ref = "prod/pairs"
         logging.warn(f"[production-mode] strategy: BINANCE-SPOT-{strategy}"
             f"paths=ticker: {ticker_topic_path}, klines: {klines_topic_path},"
             f"distribute: {dist_topic_path}, archive: {archive_topic_path}")
@@ -46,8 +47,9 @@ def main(exchange: str,
         klines_topic_path = f'dev-klines-{exchange}-{version}-sub'
         dist_topic_path = f'dev-distribute-signal-{exchange}-{version}'
         archive_topic_path = f'dev-signal-{exchange}-{version}'
-        database_ref = f"dev/signals"
-        thresholds_ref = f"dev/thresholds"
+        database_ref = "dev/signals"
+        thresholds_ref = "dev/thresholds"
+        pairs_ref = "dev/pairs"
     # initialize signal engine class and run it
     params = {
         "ticker": dict(id=ticker_topic_path, timeout=timeout),
@@ -64,6 +66,7 @@ def main(exchange: str,
         database=database,
         database_ref=database_ref,
         thresholds_ref=thresholds_ref,
+        pairs_ref=pairs_ref,
         archive_topic_path=archive_topic_path,
         dist_topic_path=dist_topic_path,
         publisher=publisher,

@@ -1,5 +1,6 @@
 import os, asyncio, json
 from datetime import datetime
+import firebase_admin
 from google.cloud import pubsub_v1
 from kaihft.engines import SignalEngine
 from kaihft.databases import KaiRealtimeDatabase
@@ -21,6 +22,7 @@ signal_engine = SignalEngine(
     database=database,
     database_ref='dev/signals',
     thresholds_ref='dev/thresholds',
+    pairs_ref="dev/pairs",
     archive_topic_path='dev-signal-binance-v0',
     dist_topic_path='dev-distribute-signal-binance-v0',
     publisher=publisher,
@@ -44,7 +46,9 @@ def test_listen_thresholds():
     try:
         loop = asyncio.get_event_loop() 
         loop.run_until_complete(signal_engine.listen_thresholds(callback))
-    finally: signal_engine.thresholds_listener.close()
+    finally: 
+        if signal_engine.listener_thresholds: 
+            signal_engine.listener_thresholds.close()
 
 def test_update_thresholds():
     long_spread, long_ttp = 2, 0.5
@@ -61,6 +65,29 @@ def test_update_thresholds():
     assert signal_engine.strategy.long_ttp == long_ttp
     assert signal_engine.strategy.short_spread == short_spread
     assert signal_engine.strategy.short_ttp == short_ttp
+
+def test_listen_pairs():
+    def callback(event):
+        pairs = event.data
+        assert 'long' in pairs and 'short' in pairs
+    try:
+        loop = asyncio.get_event_loop() 
+        loop.run_until_complete(signal_engine.listen_pairs(callback))
+    finally: 
+        if signal_engine.listener_pairs: 
+            signal_engine.listener_pairs.close()
+
+def test_update_pairs():
+    long = ["MKRUSDT", "SOLUSDT", "MANAUSDT"]
+    short = ["BTCUSDT", "ETHUSDT", "LTCUSDT"]
+    class Event():
+        def __init__(self):
+            self.event_type = 'put'
+            self.path = '/'
+            self.data = dict(long=long, short=short)
+    signal_engine._update_pairs(Event())
+    assert signal_engine.pairs["long"] == long
+    assert signal_engine.pairs["short"] == short
 
 def test_update_signals():
     now = datetime.utcnow().timestamp()
@@ -85,3 +112,7 @@ def test_scout_signals():
         def ack(self): pass
     signal_engine.scout_signals(Message())
     assert signal_engine.klines_counts > 1
+    
+    # TODO
+    # ensure that you delete the app at the end of the last of test function
+    firebase_admin.delete_app(database.application)

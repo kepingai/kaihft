@@ -1,5 +1,7 @@
 import os
-from kaihft.databases import KaiRealtimeDatabase, database
+
+import firebase_admin
+from kaihft.databases import KaiRealtimeDatabase
 
 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'credentials.json'
 
@@ -17,3 +19,4 @@ def test_database():
     database.update('dev/test', {'status': False})
     status = database.get('dev/test/status')
     assert not status
+    firebase_admin.delete_app(database.application)

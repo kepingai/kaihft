@@ -17,6 +17,7 @@ class SignalEngine():
         database: KaiRealtimeDatabase,
         database_ref: str, 
         thresholds_ref: str,
+        pairs_ref: str,
         archive_topic_path: str,
         dist_topic_path: str,
         publisher: KaiPublisherClient,
@@ -37,7 +38,9 @@ class SignalEngine():
             database: `KaiRealtimeDatabase`
                 real-time database containing the most-recent signals.
             database_ref: `str`
-                A string of database reference path.
+                A string of database reference path to thresholds.
+            pairs_ref: `str`
+                A string of database reference path to allowed pairs.
             archive_topic_path: `str`
                 Is the signal archiving topic path for new and closed signals.
             dist_topic_path: `str`
@@ -72,6 +75,7 @@ class SignalEngine():
         self.database = database
         self.database_ref = database_ref
         self.thresholds_ref = thresholds_ref
+        self.pairs_ref = pairs_ref
         self.archive_topic_path = archive_topic_path
         self.dist_topic_path = dist_topic_path
         self.publisher = publisher
@@ -84,7 +88,8 @@ class SignalEngine():
         self.ticker_counts = 1
         self.klines_counts = 1
         self.thresholds = self._get_thresholds()
-        self.thresholds_listener = None
+        self.pairs = self._get_pairs()
+        self.listener_thresholds, self.listener_pairs = None, None
         self.strategy = self._get_strategy(strategy, self.thresholds)
     
     def run(self):
@@ -112,7 +117,8 @@ class SignalEngine():
         await asyncio.gather(
             self.subscribe(self.ticker_subscriber, 'ticker', self.update_signals),
             self.subscribe(self.klines_subscriber, 'klines', self.scout_signals),
-            self.listen_thresholds(self._update_thresholds)
+            self.listen_thresholds(self._update_thresholds),
+            self.listen_pairs(self._update_pairs)
         )
         with self.ticker_subscriber.client, self.klines_subscriber.client:
             try:
@@ -131,7 +137,9 @@ class SignalEngine():
                 self.klines_subscriber.streaming_pull_future.result()
                 logging.error(f"Exception caught subscription, Error: {e}")
             finally:
-                if self.thresholds_listener: self.thresholds_listener.close()
+                # close all subscription to database
+                if self.listener_thresholds: self.listener_thresholds.close()
+                if self.listener_pairs: self.listener_pairs.close()
     
     async def listen_thresholds(self, callback: callable):
         """ Will begin subscription to thresholds in database. 
@@ -139,11 +147,24 @@ class SignalEngine():
             Parameters
             ----------
             callback: `callable`
-                A function to callback to listen events.
+                A function to callback to listen for events.
         """
-        self.thresholds_listener = self.database.listen(
+        self.listener_thresholds = self.database.listen(
             reference=self.thresholds_ref,
             callback=callback)
+    
+    async def listen_pairs(self, callback: callable):
+        """ Will begin subscription to pairs in database. 
+        
+            Parameters
+            ----------
+            callback: `callable`
+                A function to callback to listen for events.
+        """
+        self.listener_pairs = self.database.listen(
+            reference=self.pairs_ref,
+            callback=callback
+        )
     
     def _update_thresholds(self, event):
         """ The callback to update new thresholds to strategy. 
@@ -176,6 +197,35 @@ class SignalEngine():
         self.strategy.short_spread= thresholds['short']['bet_threshold']
         self.strategy.short_ttp = thresholds['short']['ttp_threshold']
         logging.info(f"[listen] updated-strategy-new-thresholds: {thresholds}")
+    
+    def _update_pairs(self, event):
+        """ The callback to update new pairs to strategy. 
+
+            Parameters
+            ----------
+            event: `db.Event`
+                This event can access the data, path & event_type
+        """
+        if str(event.event_type) != 'put' or event.data is None: return
+        if str(event.path) != '/': 
+            logging.error("Pairs not updated! Only update pairs via "
+                f"supervisor's notebook pairs injection!")
+            return
+        pairs = event.data
+        # ensure that both long and short thresholds in the data
+        if 'long' not in pairs or 'short' not in pairs: 
+            logging.error(f"Pairs required `long` and `short`, instead got: {pairs.keys()}")
+            return
+        # ensure that data structure matches with production
+        if not isinstance(pairs['long'], list) or not isinstance(pairs['short'], list):
+            logging.error(f"Pairs `long` and `short` must be a list, instead got: {pairs}")
+            return
+        # update the strategy's with new thresholds
+        logging.info(f"[listen] retrieving-new-pairs from signal database.")
+        pairs['long'] = [pair.upper() for pair in pairs['long']]
+        pairs['short'] = [pair.upper() for pair in pairs['short']]
+        self.pairs.update(pairs)
+        logging.info(f"[listen] updated-pairs: {pairs}")
     
     async def subscribe(self,
                         subscriber: KaiSubscriberClient,
@@ -321,14 +371,21 @@ class SignalEngine():
                 callback=self.close_signal)
             # if signal is triggered
             if signal and signal.symbol not in self.signals: 
-                # save the signal to class attrs
-                self.signals[symbol] = signal
-                # distribute the signal
-                self.distribute_signal(signal)
-                # archive the signal
-                self.archive_signal(signal)
-                # update/set engine state in real-time
-                self.set_enging_state()
+                # ensure that symbol is allowed based on pairs
+                pairs = self.pairs['short'] if signal.direction == 0 else self.pairs['long']
+                if signal.symbol in pairs:
+                    # save the signal to class attrs
+                    self.signals[symbol] = signal
+                    # distribute the signal
+                    self.distribute_signal(signal)
+                    # archive the signal
+                    self.archive_signal(signal)
+                    # update/set engine state in real-time
+                    self.set_enging_state()
+                else: 
+                    # log the restricted pair to ensure its dynamicity
+                    logging.info(f"[restricted] denied-signal, pair: {signal.symbol} "
+                        f"type: {signal.direction} is not allowed.")
         except Exception as e:
             logging.error(f"[strategy] Exception caught running-strategy, "
                 f"symbol:-{symbol}, error: {e}")
@@ -485,12 +542,17 @@ class SignalEngine():
             `dict`
                 A dictionary containing thresholds for
                 long and short strategies.
+            
+            Raises
+            ------
+            `ValueError`
+                Will raise if data structure does not match production.
         """
         logging.info(f"[get] retrieving-thresholds from signal database.")
         thresholds = self.database.get(self.thresholds_ref)
         if not thresholds: raise ValueError(f"Thresholds are not set for layer 1!")
         if 'long' not in thresholds or 'short' not in thresholds: 
-            ValueError(f"Thresholds required `long` and `short`, instead got: {thresholds.keys()}")
+            raise ValueError(f"Thresholds required `long` and `short`, instead got: {thresholds.keys()}")
         for dir, threshold in thresholds.items():
             if 'bet_threshold' not in threshold or 'ttp_threshold' not in threshold:
                 raise ValueError(f"Missing `bet_threshold` and/or `ttp_threshold` "
@@ -498,6 +560,35 @@ class SignalEngine():
         logging.info(f"[get] retrieved-thresholds: {thresholds} from database.")
         return thresholds
     
+    def _get_pairs(self) -> dict:
+        """ Will retrieve the pairs for layer1. 
+
+            Returns
+            -------
+            `dict`
+                A dictionary containing long and short pairs
+                allowed to be monitored.
+            
+            Raises
+            ------
+            `ValueError`
+                Will raise if data structure does not match production.
+        """
+        logging.info(f"[get] retrieving-pairs from signal database.")
+        pairs = self.database.get(self.pairs_ref)
+        if not pairs: raise ValueError(f"Pairs are not yet set for layer 1!")
+        # ensure that both long and short thresholds in the data
+        if 'long' not in pairs or 'short' not in pairs: 
+            raise ValueError(f"Pairs required `long` and `short`, instead got: {pairs.keys()}")
+        # ensure that data structure matches with production
+        if not isinstance(pairs['long'], list) or not isinstance(pairs['short'], list):
+            raise ValueError(f"Pairs `long` and `short` must be a list, instead got: {pairs}")
+        logging.info(f"[get] retrieved-pairs: {pairs} from database")
+        # ensure that all pairs uppercase
+        long = [pair.upper() for pair in pairs['long']]
+        short = [pair.upper() for pair in pairs['short']]
+        return dict(long=long, short=short)
+        
     def _get_strategy(self, strategy: str, thresholds: dict) -> Strategy:
         """ Will return the strategy chosen.
 
