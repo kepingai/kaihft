@@ -12,8 +12,8 @@ __MARKETS = {
     '1inchusdt','aaveusdt', 'adausdt', 'algousdt', 'atomusdt', 
     'audiousdt', 'avaxusdt', 'batusdt', 'bnbusdt', 'btcusdt', 
     'compusdt', 'crvusdt', 'dogeusdt', 'dotusdt', 'egldusdt', 
-    'ethusdt', 'ftmusdt', 'grtusdt', 'hbarusdt', 'icxusdt' 
-    'iotausdt' 'ksmusdt', 'linkusdt', 'ltcusdt', 'maticusdt', 
+    'ethusdt', 'ftmusdt', 'grtusdt', 'hbarusdt', 'icxusdt', 
+    'iotausdt', 'ksmusdt', 'linkusdt', 'ltcusdt', 'maticusdt', 
     'mkrusdt', 'nearusdt', 'neousdt', 'oneusdt', 'runeusdt', 
     'solusdt', 'stxusdt','sxpusdt', 'thetausdt', 'tkousdt', 
     'uniusdt', 'vetusdt', 'xlmusdt', 'xmrusdt', 'xrpusdt', 
