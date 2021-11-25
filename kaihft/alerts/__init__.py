@@ -5,8 +5,7 @@
     - `Slack`: A dedicated channel will be notified.
     - `Logging`: system in deployed Kubernetes Cluster.
 """
-
-import os, sys
+import os, sys, requests
 from .alert import *
 from .slack import *
 from pathlib import Path
@@ -38,7 +37,7 @@ def notify_failure(fn: callable):
                 f"Line: {exc_tb.tb_lineno}")
             # if explicit restart pod exception is raised
             # delete the health path to trigger liveness probe to restart pod
-            if exc_type == RestartPodException:
+            if exc_type == RestartPodException or requests.exceptions.ConnectionError:
                 if os.path.exists(health_path): os.remove(health_path)
             # else if the exception raise is not meant
             # for restarting the pod, send error to slack
