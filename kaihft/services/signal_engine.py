@@ -46,9 +46,9 @@ def main(exchange: str,
     klines_topic_path = f'{path}-klines-{exchange}-{version}-sub'
     dist_topic_path = f'{path}-distribute-signal-{exchange}-{version}'
     archive_topic_path = f'{path}-signal-{exchange}-{version}'
-    database_ref = "{path}/signals"
-    thresholds_ref = "{path}/thresholds"
-    pairs_ref = "{path}/pairs"
+    database_ref = f"{path}/signals"
+    thresholds_ref = f"{path}/thresholds"
+    pairs_ref = f"{path}/pairs"
     logging.warn(f"[{mode}-mode] strategy: BINANCE-SPOT-{strategy}"
         f"paths: ticker: {ticker_topic_path}, klines: {klines_topic_path},"
         f"distribute: {dist_topic_path}, archive: {archive_topic_path}"
