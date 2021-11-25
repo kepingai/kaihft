@@ -37,46 +37,18 @@ def main(exchange: str,
         log_metrics_every: `int`
             Log layer 2 inference metrics every.
     """
-    if production:
-        ticker_topic_path = f'prod-ticker-{exchange}-{version}-sub'
-        klines_topic_path = f'prod-klines-{exchange}-{version}-sub'
-        dist_topic_path = f'prod-distribute-signal-{exchange}-{version}'
-        archive_topic_path = f'prod-signal-{exchange}-{version}'
-        database_ref = "prod/signals"
-        thresholds_ref = "prod/thresholds"
-        pairs_ref = "prod/pairs"
-        endpoint = "predict_15m"
-        mode = "production"
-    elif exp0a:
-        ticker_topic_path = f'exp0a-ticker-{exchange}-{version}-sub'
-        klines_topic_path = f'exp0a-klines-{exchange}-{version}-sub'
-        dist_topic_path = f'exp0a-distribute-signal-{exchange}-{version}'
-        archive_topic_path = f'exp0a-signal-{exchange}-{version}'
-        database_ref = "exp0a/signals"
-        thresholds_ref = "exp0a/thresholds"
-        pairs_ref = "exp0a/pairs"
-        endpoint = "EXP0A_predict_15m"
-        mode = "experiment-0a"
-    elif exp1a:
-        ticker_topic_path = f'exp1a-ticker-{exchange}-{version}-sub'
-        klines_topic_path = f'exp1a-klines-{exchange}-{version}-sub'
-        dist_topic_path = f'exp1a-distribute-signal-{exchange}-{version}'
-        archive_topic_path = f'exp1a-signal-{exchange}-{version}'
-        database_ref = "exp1a/signals"
-        thresholds_ref = "exp1a/thresholds"
-        pairs_ref = "exp1a/pairs"
-        endpoint = "EXP1A_predict_15m"
-        mode = "experiment-1a"
-    else: 
-        ticker_topic_path = f'dev-ticker-{exchange}-{version}-sub'
-        klines_topic_path = f'dev-klines-{exchange}-{version}-sub'
-        dist_topic_path = f'dev-distribute-signal-{exchange}-{version}'
-        archive_topic_path = f'dev-signal-{exchange}-{version}'
-        database_ref = "dev/signals"
-        thresholds_ref = "dev/thresholds"
-        pairs_ref = "dev/pairs"
-        endpoint = "dev_predict_15m"
-        mode = "development"
+    # retrieve the appropriate paths for topics and database references
+    if production: path='prod'; endpoint="predict_15m"; mode="production"
+    elif exp0a: path='exp0a'; endpoint="EXP0A_predict_15m"; mode="experiment-0a"
+    elif exp1a: path='exp1a'; endpoint="EXP1A_predict_15m"; mode="experiment-1a"
+    else: path='dev'; endpoint="dev_predict_15m"; mode="development"
+    ticker_topic_path = f'{path}-ticker-{exchange}-{version}-sub'
+    klines_topic_path = f'{path}-klines-{exchange}-{version}-sub'
+    dist_topic_path = f'{path}-distribute-signal-{exchange}-{version}'
+    archive_topic_path = f'{path}-signal-{exchange}-{version}'
+    database_ref = "{path}/signals"
+    thresholds_ref = "{path}/thresholds"
+    pairs_ref = "{path}/pairs"
     logging.warn(f"[{mode}-mode] strategy: BINANCE-SPOT-{strategy}"
         f"paths: ticker: {ticker_topic_path}, klines: {klines_topic_path},"
         f"distribute: {dist_topic_path}, archive: {archive_topic_path}"
