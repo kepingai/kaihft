@@ -57,10 +57,14 @@ def test_predict():
         start_str=str(start))
     df = to_dataframe(base, klines, quote, '15m')
     # begin testing predict here
-    result = predict(base=base, quote=quote, data=df.to_dict('list'))
-    assert result is not None
-    pred = result['predictions']
-    assert float(pred['percentage_spread']) > 0
-    assert int(pred['direction']) < 2 and int(pred['direction']) >= 0
-    assert result['base'] == base
-    assert result['quote'] == quote
+    endpoints = ['predict_15m', 'dev_predict_15m', 'EXP0A_predict_15m', 'EXP1A_predict_15m']
+    for endpoint in endpoints:
+        result = predict(
+            endpoint=endpoint, base=base, 
+            quote=quote, data=df.to_dict('list'))
+        assert result is not None
+        pred = result['predictions']
+        assert float(pred['percentage_spread']) > 0
+        assert int(pred['direction']) < 2 and int(pred['direction']) >= 0
+        assert result['base'] == base
+        assert result['quote'] == quote

@@ -49,12 +49,16 @@ def klines_binance_spot(klines, production):
 @click.option('--log-every', default=1000, help="log cloud pub/sub messages every.")
 @click.option('--log-metrics-every', default=100, help="log layer2 metrics every.")
 @click.option('--production', is_flag=True, help='publish & subscribe messages to production topic.')
+@click.option('--exp0a', is_flag=True, help='publish & subscribe messages to exp0a topic.')
+@click.option('--exp1a', is_flag=True, help='publish & subscribe messages to exp1a topic.')
 @notify_failure
-def signal_binance_spot(strategy, version, log_every, log_metrics_every, production):
+def signal_binance_spot(strategy, version, log_every, log_metrics_every, production, exp0a, exp1a):
     services.signal_engine.main(
         exchange='binance',
         strategy=strategy,
         production=production,
+        exp0a=exp0a,
+        exp1a=exp1a,
         version=version,
         log_every=log_every,
         log_metrics_every=log_metrics_every)

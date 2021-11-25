@@ -34,12 +34,14 @@ def fetch_id_token(audience: str) -> Union[str, None]:
     credentials.refresh(request)
     return credentials.token
 
-def predict(base: str, quote: str, data: dict) -> Union[dict, None]:
+def predict(endpoint: str, base: str, quote: str, data: dict) -> Union[dict, None]:
     """ Forecast the price spread in percentage and direction of
         a generic Coin n ticks to the future and its direction.
 
         Parameters
         ----------
+        endpoint: `str`
+            The endpoint of request to layer 2.
         base: `str`
             The base symbol of the ticker.
         quote: `str`
@@ -98,7 +100,7 @@ def predict(base: str, quote: str, data: dict) -> Union[dict, None]:
         ... }
     """
     job_id = "0A"
-    base_url = "https://us-central1-keping-ai-continuum.cloudfunctions.net/predict_15m"
+    base_url = f"https://us-central1-keping-ai-continuum.cloudfunctions.net/{endpoint}"
     model_url = f"{base_url}_{base.lower()}_{quote.lower()}_{job_id}"
     # fetch id token first
     id_token = fetch_id_token(model_url)

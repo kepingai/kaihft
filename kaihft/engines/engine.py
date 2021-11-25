@@ -26,7 +26,8 @@ class SignalEngine():
         subscriptions_params: dict,
         log_every: int,
         log_metrics_every: int,
-        strategy: str = 'STS'):
+        strategy: str = 'STS',
+        endpoint: str = 'predict_15m'):
         """ Will initialize the signal engine
             to scout for potential actionable intelligence
             from ticker, klines data subscriber. This signal
@@ -53,6 +54,8 @@ class SignalEngine():
                 A dictionary containing the subscription id and timeout.
             strategy: `str`
                 The strategy to run, default to STS.
+            endpoint: `str`
+                The endpoint to request to layer 2.
             log_every: `int`
                 Log ticker and klines messages every.
             log_metrics_every: `int`
@@ -90,6 +93,7 @@ class SignalEngine():
         self.thresholds = self._get_thresholds()
         self.pairs = self._get_pairs()
         self.listener_thresholds, self.listener_pairs = None, None
+        self.endpoint = endpoint
         self.strategy = self._get_strategy(strategy, self.thresholds)
     
     def run(self):
@@ -610,6 +614,7 @@ class SignalEngine():
                 If key id not match or strategy not available.
         """
         return get_strategy(strategy)(
+            endpoint=self.endpoint,
             long_spread=thresholds['long']['bet_threshold'],
             long_ttp=thresholds['long']['ttp_threshold'],
             short_spread=thresholds['short']['bet_threshold'],

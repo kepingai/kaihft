@@ -51,6 +51,7 @@ def test_strategy():
     # initialize strategy with very low spread
     # long and short to ensure that signal creation.
     strategy = SuperTrendSqueeze(
+        endpoint='predict_15m',
         long_spread=0.15, 
         long_ttp=0.15,
         short_spread=0.15,

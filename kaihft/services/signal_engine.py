@@ -7,6 +7,8 @@ from kaihft.engines import SignalEngine
 def main(exchange: str,
          strategy: str,
          production: bool,
+         exp0a: bool,
+         exp1a: bool,
          log_every: int,
          log_metrics_every: int,
          timeout: int = None,
@@ -20,6 +22,10 @@ def main(exchange: str,
             A limited strategy choices to run.
         production: `bool`
             if `True` publisher will publish to production topic.
+        exp0a: `bool`
+            if `True` publisher will publish to exp0a topic.
+        exp1a: `bool`
+            if `True` publisher will publish to exp1a topic.
         exchange: `str`
             the exchange name, default to binance.
         timeout: `int`
@@ -39,9 +45,28 @@ def main(exchange: str,
         database_ref = "prod/signals"
         thresholds_ref = "prod/thresholds"
         pairs_ref = "prod/pairs"
-        logging.warn(f"[production-mode] strategy: BINANCE-SPOT-{strategy}"
-            f"paths=ticker: {ticker_topic_path}, klines: {klines_topic_path},"
-            f"distribute: {dist_topic_path}, archive: {archive_topic_path}")
+        endpoint = "predict_15m"
+        mode = "production"
+    elif exp0a:
+        ticker_topic_path = f'exp0a-ticker-{exchange}-{version}-sub'
+        klines_topic_path = f'exp0a-klines-{exchange}-{version}-sub'
+        dist_topic_path = f'exp0a-distribute-signal-{exchange}-{version}'
+        archive_topic_path = f'exp0a-signal-{exchange}-{version}'
+        database_ref = "exp0a/signals"
+        thresholds_ref = "exp0a/thresholds"
+        pairs_ref = "exp0a/pairs"
+        endpoint = "EXP0A_predict_15m"
+        mode = "experiment-0a"
+    elif exp1a:
+        ticker_topic_path = f'exp1a-ticker-{exchange}-{version}-sub'
+        klines_topic_path = f'exp1a-klines-{exchange}-{version}-sub'
+        dist_topic_path = f'exp1a-distribute-signal-{exchange}-{version}'
+        archive_topic_path = f'exp1a-signal-{exchange}-{version}'
+        database_ref = "exp1a/signals"
+        thresholds_ref = "exp1a/thresholds"
+        pairs_ref = "exp1a/pairs"
+        endpoint = "EXP1A_predict_15m"
+        mode = "experiment-1a"
     else: 
         ticker_topic_path = f'dev-ticker-{exchange}-{version}-sub'
         klines_topic_path = f'dev-klines-{exchange}-{version}-sub'
@@ -50,6 +75,12 @@ def main(exchange: str,
         database_ref = "dev/signals"
         thresholds_ref = "dev/thresholds"
         pairs_ref = "dev/pairs"
+        endpoint = "dev_predict_15m"
+        mode = "development"
+    logging.warn(f"[{mode}-mode] strategy: BINANCE-SPOT-{strategy}"
+        f"paths: ticker: {ticker_topic_path}, klines: {klines_topic_path},"
+        f"distribute: {dist_topic_path}, archive: {archive_topic_path}"
+        f"layer 2 endpoint: {endpoint}")
     # initialize signal engine class and run it
     params = {
         "ticker": dict(id=ticker_topic_path, timeout=timeout),
@@ -75,6 +106,7 @@ def main(exchange: str,
         subscriptions_params=params,
         log_every=log_every,
         log_metrics_every=log_metrics_every,
-        strategy=strategy)
+        strategy=strategy,
+        endpoint=endpoint)
     # run the engine!
     signal_engine.run()

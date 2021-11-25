@@ -13,6 +13,7 @@ class Strategy():
     def __init__(self, 
                  name: str, 
                  description: str, 
+                 endpoint: str,
                  long_spread: float,
                  long_ttp: float,
                  short_spread: float,
@@ -20,6 +21,7 @@ class Strategy():
                  log_every: int):
         self.name = name
         self.description = description
+        self.endpoint = endpoint
         self.long_spread = long_spread
         self.long_ttp = long_ttp
         self.short_spread = short_spread
@@ -46,7 +48,8 @@ class Strategy():
             data: `dict`
                 Dictionary containing list of klines.
         """
-        result = predict(base=base, quote=quote, data=data)
+        result = predict(endpoint=self.endpoint, base=base, 
+            quote=quote, data=data)
         if not result: return None, None, None, base, quote
         pred = result['predictions']
         return (float(pred['percentage_spread']), 
@@ -106,6 +109,7 @@ class SuperTrendSqueeze(Strategy):
         intelligence based on a specific market behavior. 
     """
     def __init__(self, 
+                endpoint: str,
                 long_spread: float,
                 long_ttp: float,
                 short_spread: float,
@@ -116,6 +120,8 @@ class SuperTrendSqueeze(Strategy):
 
             Parameters
             ----------
+            endpoint: `str`
+                The endpoint to request to layer 2.
             long_spread: `float`
                 The longing spread required from layer 2 prediction.
             long_ttp: `float`
@@ -130,6 +136,7 @@ class SuperTrendSqueeze(Strategy):
         super().__init__(
             name="SUPERTREND_SQUEEZE", 
             description="SuperTrend x Squeeze Long vs. Short strategy.",
+            endpoint=endpoint,
             long_spread=long_spread,
             long_ttp=long_ttp,
             short_spread=short_spread,
