@@ -51,7 +51,7 @@ def main(exchange: str,
     pairs_ref = f"{path}/pairs"
     logging.warn(f"[{mode}-mode] strategy: BINANCE-SPOT-{strategy}"
         f"paths: ticker: {ticker_topic_path}, klines: {klines_topic_path},"
-        f"distribute: {dist_topic_path}, archive: {archive_topic_path}"
+        f"distribute: {dist_topic_path}, archive: {archive_topic_path}, "
         f"layer 2 endpoint: {endpoint}")
     # initialize signal engine class and run it
     params = {

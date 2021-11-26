@@ -90,6 +90,7 @@ class SignalEngine():
         self.log_metrics_every = log_metrics_every
         self.ticker_counts = 1
         self.klines_counts = 1
+        # the initialization should be in this order
         self.thresholds = self._get_thresholds()
         self.pairs = self._get_pairs()
         self.listener_thresholds, self.listener_pairs = None, None
@@ -229,7 +230,9 @@ class SignalEngine():
         pairs['long'] = [pair.upper() for pair in pairs['long']]
         pairs['short'] = [pair.upper() for pair in pairs['short']]
         self.pairs.update(pairs)
-        logging.info(f"[listen] updated-pairs: {pairs}")
+        # update the strategy pairs changes
+        self.strategy.pairs = pairs
+        logging.info(f"[listen] updated-pairs in strategy: {pairs}")
     
     async def subscribe(self,
                         subscriber: KaiSubscriberClient,
@@ -375,21 +378,14 @@ class SignalEngine():
                 callback=self.close_signal)
             # if signal is triggered
             if signal and signal.symbol not in self.signals: 
-                # ensure that symbol is allowed based on pairs
-                pairs = self.pairs['short'] if signal.direction == 0 else self.pairs['long']
-                if signal.symbol in pairs:
-                    # save the signal to class attrs
-                    self.signals[symbol] = signal
-                    # distribute the signal
-                    self.distribute_signal(signal)
-                    # archive the signal
-                    self.archive_signal(signal)
-                    # update/set engine state in real-time
-                    self.set_enging_state()
-                else: 
-                    # log the restricted pair to ensure its dynamicity
-                    logging.info(f"[restricted] denied-signal, pair: {signal.symbol} "
-                        f"type: {signal.direction} is not allowed.")
+                # save the signal to class attrs
+                self.signals[symbol] = signal
+                # distribute the signal
+                self.distribute_signal(signal)
+                # archive the signal
+                self.archive_signal(signal)
+                # update/set engine state in real-time
+                self.set_enging_state()                    
         except Exception as e:
             logging.error(f"[strategy] Exception caught running-strategy, "
                 f"symbol:-{symbol}, error: {e}")
@@ -619,4 +615,5 @@ class SignalEngine():
             long_ttp=thresholds['long']['ttp_threshold'],
             short_spread=thresholds['short']['bet_threshold'],
             short_ttp=thresholds['short']['ttp_threshold'],
+            pairs=self.pairs,
             log_every=self.log_metrics_every)

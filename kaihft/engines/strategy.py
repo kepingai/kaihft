@@ -18,6 +18,7 @@ class Strategy():
                  long_ttp: float,
                  short_spread: float,
                  short_ttp: float,
+                 pairs: dict,
                  log_every: int):
         self.name = name
         self.description = description
@@ -26,6 +27,7 @@ class Strategy():
         self.long_ttp = long_ttp
         self.short_spread = short_spread
         self.short_ttp = short_ttp
+        self.pairs = pairs
         self.log_every = log_every
         # initialize multi-core threads
         ne.set_vml_num_threads(8)
@@ -109,12 +111,13 @@ class SuperTrendSqueeze(Strategy):
         intelligence based on a specific market behavior. 
     """
     def __init__(self, 
-                endpoint: str,
-                long_spread: float,
-                long_ttp: float,
-                short_spread: float,
-                short_ttp: float,
-                log_every: int):
+                 endpoint: str,
+                 long_spread: float,
+                 long_ttp: float,
+                 short_spread: float,
+                 short_ttp: float,
+                 pairs: dict,
+                 log_every: int):
         """ Initialize SuperTrendSqueeze class with specified spread & take profit
             percentage thresholds.
 
@@ -130,6 +133,8 @@ class SuperTrendSqueeze(Strategy):
                 The shorting spread required from layer 2 prediction.
             short_ttp: `float`
                 The short signal take profit percentage to take from the signal.
+            pairs: `dict`
+                A dictionary of `long` and `short` pairs allowed to scout.
             log_every: `int`
                 Log the metrics from layer 2 every n-iteration.
         """
@@ -141,6 +146,7 @@ class SuperTrendSqueeze(Strategy):
             long_ttp=long_ttp,
             short_spread=short_spread,
             short_ttp=short_ttp,
+            pairs=pairs,
             log_every=log_every)
         # in this class we will be using
         # lazybear's momentum squeeze, ema 99
@@ -224,9 +230,10 @@ class SuperTrendSqueeze(Strategy):
         direction = ta_dataframe.iloc[-1][supertrend]
         squeeze = ta_dataframe.iloc[-1].SQZ_OFF
         last_price = ta_dataframe.iloc[-1].close
+        pair = f"{base}{quote}".upper()
         ttp = 0
         # if direction is long and squeeze is off
-        if direction == 1 and squeeze == 1:
+        if direction == 1 and squeeze == 1 and pair in self.pairs['long']:
             # inference to layer 2
             _spread, _direction, _n_tick, base, quote = self.layer2(
                 base=base, quote=quote, data=clean_df.to_dict('list'))
@@ -238,7 +245,7 @@ class SuperTrendSqueeze(Strategy):
             # record the ending time of analysis
             self.save_metrics(start, f"{base}{quote}")
         # else if direction is short and squeeze is off
-        elif direction == -1 and squeeze == 1:
+        elif direction == -1 and squeeze == 1 and pair in self.pairs['short']:
             # inference to layer 2
             _spread, _direction, _n_tick, base, quote = self.layer2(
                 base=base, quote=quote, data=clean_df.to_dict('list'))
