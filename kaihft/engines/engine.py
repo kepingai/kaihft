@@ -1,10 +1,11 @@
 import pandas as pd
-import logging, json, asyncio
+import logging, json, asyncio, requests
 from datetime import datetime
 from google.cloud import pubsub_v1
 from kaihft.databases import KaiRealtimeDatabase
 from kaihft.publishers.client import KaiPublisherClient
 from kaihft.subscribers.client import KaiSubscriberClient
+from kaihft.alerts.exceptions import RestartPodException
 from .strategy import get_strategy, Strategy
 from .signal import init_signal_from_rtd, Signal
 
@@ -385,7 +386,10 @@ class SignalEngine():
                 # archive the signal
                 self.archive_signal(signal)
                 # update/set engine state in real-time
-                self.set_enging_state()                    
+                self.set_enging_state()         
+        except requests.exceptions.ConnectionError as e:
+            raise RestartPodException(f"[strategy] Unable to connect to "
+                f"firebase rtd pod need to restart, error: {e}")         
         except Exception as e:
             logging.error(f"[strategy] Exception caught running-strategy, "
                 f"symbol:-{symbol}, error: {e}")
