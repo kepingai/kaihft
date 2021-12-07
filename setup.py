@@ -23,7 +23,7 @@ setuptools.setup(
         "numpy==1.21.2",
         "numexpr==2.7.1"
     ],
-    version="0.0.8",
+    version="0.0.9",
     author="PT. Idabagus Engineering Indonesia",
     author_email="support@kepingai.com",
     maintainer="Ida Bagus Ratu Diaz Agasatya", 
