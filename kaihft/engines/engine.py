@@ -1,5 +1,5 @@
 import pandas as pd
-import logging, json, asyncio, requests
+import logging, json, asyncio
 from datetime import datetime
 from google.cloud import pubsub_v1
 from kaihft.databases import KaiRealtimeDatabase
@@ -386,13 +386,12 @@ class SignalEngine():
                 # archive the signal
                 self.archive_signal(signal)
                 # update/set engine state in real-time
-                self.set_enging_state()         
-        except requests.exceptions.ConnectionError as e:
-            raise RestartPodException(f"[strategy] Unable to connect to "
-                f"firebase rtd pod need to restart, error: {e}")         
+                self.set_enging_state()                 
         except Exception as e:
             logging.error(f"[strategy] Exception caught running-strategy, "
                 f"symbol:-{symbol}, error: {e}")
+            raise RestartPodException(f"[strategy] Unable to connect to "
+                f"firebase rtd pod need to restart, error: {e}")   
         finally:
             # ensure that the symbol is removed
             # from scouts so that there will be no locks.
