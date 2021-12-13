@@ -230,10 +230,12 @@ class SuperTrendSqueeze(Strategy):
         direction = ta_dataframe.iloc[-1][supertrend]
         squeeze = ta_dataframe.iloc[-1].SQZ_OFF
         last_price = ta_dataframe.iloc[-1].close
+        open_price = ta_dataframe.iloc[-1].open
         pair = f"{base}{quote}".upper()
         ttp = 0
-        # if direction is long and squeeze is off
-        if direction == 1 and squeeze == 1 and pair in self.pairs['long']:
+        # if direction is long and squeeze is off and green candle
+        if (direction == 1 and squeeze == 1 and 
+            pair in self.pairs['long'] and last_price > open_price):
             # inference to layer 2
             _spread, _direction, _n_tick, base, quote = self.layer2(
                 base=base, quote=quote, data=clean_df.to_dict('list'))
@@ -244,8 +246,9 @@ class SuperTrendSqueeze(Strategy):
                 signal = True
             # record the ending time of analysis
             self.save_metrics(start, f"{base}{quote}")
-        # else if direction is short and squeeze is off
-        elif direction == -1 and squeeze == 1 and pair in self.pairs['short']:
+        # else if direction is short and squeeze is off and red candle
+        elif (direction == -1 and squeeze == 1 and 
+              pair in self.pairs['short'] and last_price < open_price):
             # inference to layer 2
             _spread, _direction, _n_tick, base, quote = self.layer2(
                 base=base, quote=quote, data=clean_df.to_dict('list'))
