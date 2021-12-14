@@ -22,6 +22,7 @@ signal_engine = SignalEngine(
     database=database,
     database_ref='dev/signals',
     thresholds_ref='dev/thresholds',
+    max_drawdowns_ref='dev/max_drawdowns',
     pairs_ref="dev/pairs",
     archive_topic_path='dev-signal-binance-v0',
     dist_topic_path='dev-distribute-signal-binance-v0',

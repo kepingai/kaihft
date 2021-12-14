@@ -18,6 +18,7 @@ class SignalEngine():
         database: KaiRealtimeDatabase,
         database_ref: str, 
         thresholds_ref: str,
+        max_drawdowns_ref: str,
         pairs_ref: str,
         archive_topic_path: str,
         dist_topic_path: str,
@@ -28,6 +29,7 @@ class SignalEngine():
         log_every: int,
         log_metrics_every: int,
         strategy: str = 'STS',
+        max_drawdown: bool = False,
         endpoint: str = 'predict_15m'):
         """ Will initialize the signal engine
             to scout for potential actionable intelligence
@@ -43,6 +45,10 @@ class SignalEngine():
                 A string of database reference path to thresholds.
             pairs_ref: `str`
                 A string of database reference path to allowed pairs.
+            thresholds_ref: `str`
+                A string of database reference path to thresholds config.
+            max_drawdowns_ref: `str`
+                A string of database reference path to maximum drawdowns.
             archive_topic_path: `str`
                 Is the signal archiving topic path for new and closed signals.
             dist_topic_path: `str`
@@ -53,14 +59,18 @@ class SignalEngine():
                 The subscriber client for klines.
             subscriptions_params: `dict`
                 A dictionary containing the subscription id and timeout.
-            strategy: `str`
-                The strategy to run, default to STS.
             endpoint: `str`
                 The endpoint to request to layer 2.
             log_every: `int`
                 Log ticker and klines messages every.
             log_metrics_every: `int`
                 Log layer 2 inference metrics every.
+            strategy: `str`
+                The strategy to run, default to STS.
+            max_drawdown: `bool`
+                If `True` maximum drawdown integrated to strategy.
+            endpoint: `str`
+                The end point for layer 2 connection.
 
             Example
             -------
@@ -79,6 +89,7 @@ class SignalEngine():
         self.database = database
         self.database_ref = database_ref
         self.thresholds_ref = thresholds_ref
+        self.max_drawdowns_ref = max_drawdowns_ref
         self.pairs_ref = pairs_ref
         self.archive_topic_path = archive_topic_path
         self.dist_topic_path = dist_topic_path
@@ -91,10 +102,14 @@ class SignalEngine():
         self.log_metrics_every = log_metrics_every
         self.ticker_counts = 1
         self.klines_counts = 1
+        self.max_drawdown = max_drawdown
         # the initialization should be in this order
+        self.max_drawdowns = self._get_max_drawdowns()
         self.thresholds = self._get_thresholds()
         self.pairs = self._get_pairs()
-        self.listener_thresholds, self.listener_pairs = None, None
+        self.listener_thresholds = None
+        self.listener_pairs = None
+        self.listener_max_drawdowns = None
         self.endpoint = endpoint
         self.strategy = self._get_strategy(strategy, self.thresholds)
     
@@ -124,7 +139,8 @@ class SignalEngine():
             self.subscribe(self.ticker_subscriber, 'ticker', self.update_signals),
             self.subscribe(self.klines_subscriber, 'klines', self.scout_signals),
             self.listen_thresholds(self._update_thresholds),
-            self.listen_pairs(self._update_pairs)
+            self.listen_pairs(self._update_pairs),
+            self.listen_max_drawdowns(self._update_max_drawdowns)
         )
         with self.ticker_subscriber.client, self.klines_subscriber.client:
             try:
@@ -146,6 +162,7 @@ class SignalEngine():
                 # close all subscription to database
                 if self.listener_thresholds: self.listener_thresholds.close()
                 if self.listener_pairs: self.listener_pairs.close()
+                if self.listener_max_drawdowns: self.listener_max_drawdowns.close()
     
     async def listen_thresholds(self, callback: callable):
         """ Will begin subscription to thresholds in database. 
@@ -171,6 +188,20 @@ class SignalEngine():
             reference=self.pairs_ref,
             callback=callback
         )
+    
+    async def listen_max_drawdowns(self, callback: callable):
+        """ Will begin subscription to max drawdowns in database. 
+        
+            Parameters
+            ----------
+            callback: `callable`
+                A function to callback to listen for events.
+        """
+        if self.max_drawdown:
+            self.listener_max_drawdowns = self.database.listen(
+                reference=self.max_drawdowns_ref,
+                callback=callback
+            )
     
     def _update_thresholds(self, event):
         """ The callback to update new thresholds to strategy. 
@@ -218,7 +249,7 @@ class SignalEngine():
                 f"supervisor's notebook pairs injection!")
             return
         pairs = event.data
-        # ensure that both long and short thresholds in the data
+        # ensure that both long and short pairs in the data
         if 'long' not in pairs or 'short' not in pairs: 
             logging.error(f"Pairs required `long` and `short`, instead got: {pairs.keys()}")
             return
@@ -226,7 +257,7 @@ class SignalEngine():
         if not isinstance(pairs['long'], list) or not isinstance(pairs['short'], list):
             logging.error(f"Pairs `long` and `short` must be a list, instead got: {pairs}")
             return
-        # update the strategy's with new thresholds
+        # update the strategy's with new pairs
         logging.info(f"[listen] retrieving-new-pairs from signal database.")
         pairs['long'] = [pair.upper() for pair in pairs['long']]
         pairs['short'] = [pair.upper() for pair in pairs['short']]
@@ -234,6 +265,32 @@ class SignalEngine():
         # update the strategy pairs changes
         self.strategy.pairs = pairs
         logging.info(f"[listen] updated-pairs in strategy: {pairs}")
+
+    def _update_max_drawdowns(self, event):
+        """ The callback to update new max drawdowns to strategy. 
+
+            Parameters
+            ----------
+            event: `db.Event`
+                This event can access the data, path & event_type
+        """
+        if str(event.event_type) != 'put' or event.data is None: return
+        if str(event.path) != '/': 
+            logging.error("Max drawdowns not updated! Only update it via "
+                f"supervisor's notebook pairs injection!")
+            return
+        max_drawdowns = event.data
+        # ensure that both long and short max drawdowns are in the data
+        if 'long' not in max_drawdowns or 'short' not in max_drawdowns: 
+            logging.error(f"Max Drawdowns required `long` and `short`, instead got: {max_drawdowns.keys()}")
+            return
+        # update the strategy's with new max drawdowns
+        logging.info(f"[listen] retrieving-new-max drawdowns from signal database.")
+        self.max_drawdowns.update(max_drawdowns)
+        # update the strategy max drawdown changes
+        self.strategy.long_max_drawdown = self.max_drawdowns['long']
+        self.strategy.short_max_drawdown = self.max_drawdowns['short']
+        logging.info(f"[listen] updated-max drawdown: {self.max_drawdowns}")
     
     async def subscribe(self,
                         subscriber: KaiSubscriberClient,
@@ -537,6 +594,31 @@ class SignalEngine():
             'timeout' in params['klines']), "Subscription klines param badly formatted."
         return params
     
+    def _get_max_drawdowns(self) -> dict:
+        """ Will retrieve the maximum drawdown for layer 1. 
+
+            Returns
+            -------
+            `dict`
+                A dictionary containing max drawdowns for 
+                long and short signals.
+            
+            Raises
+            ------
+            `ValueError`
+                will raise if data structure does not match production.
+        """
+        if not self.max_drawdown: 
+            logging.info(f"[max-drawdowns] not using max-drawdowns")    
+            return None
+        logging.info(f"[get] retrieving-drawdowns from signal database.")
+        max_drawdowns = self.database.get(self.max_drawdowns_ref)
+        if 'long' not in max_drawdowns or 'short' not in max_drawdowns:
+            raise ValueError(f"Max Drawdowns required `long` and `short`, instead got: {max_drawdowns.keys()}")
+        logging.info(f"[get] retrieved-max drawdowns: {max_drawdowns} from database.")
+        return dict(long=float(max_drawdowns['long']), 
+            short=float(max_drawdowns['short']))
+    
     def _get_thresholds(self) -> dict:
         """ Will retrieve the thresholds for layer1.
             
@@ -616,7 +698,10 @@ class SignalEngine():
             endpoint=self.endpoint,
             long_spread=thresholds['long']['bet_threshold'],
             long_ttp=thresholds['long']['ttp_threshold'],
+            long_max_drawdown=self.max_drawdowns['long'] if self.max_drawdown else None,
             short_spread=thresholds['short']['bet_threshold'],
             short_ttp=thresholds['short']['ttp_threshold'],
+            short_max_drawdown=self.max_drawdowns['long'] if self.max_drawdown else None,
             pairs=self.pairs,
-            log_every=self.log_metrics_every)
+            log_every=self.log_metrics_every,
+            max_drawdown=self.max_drawdown)

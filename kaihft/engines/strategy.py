@@ -1,8 +1,9 @@
 import time, logging
 import pandas as pd
+import numpy as np
 import numexpr as ne
 import pandas_ta as ta
-from typing import Union
+from typing import Union, Tuple
 from .signal import Signal
 from .predict import predict
 from datetime import datetime
@@ -16,19 +17,25 @@ class Strategy():
                  endpoint: str,
                  long_spread: float,
                  long_ttp: float,
+                 long_max_drawdown: float,
                  short_spread: float,
                  short_ttp: float,
+                 short_max_drawdown: float,
                  pairs: dict,
-                 log_every: int):
+                 log_every: int,
+                 max_drawdown: bool):
         self.name = name
         self.description = description
         self.endpoint = endpoint
         self.long_spread = long_spread
         self.long_ttp = long_ttp
+        self.long_max_drawdown = long_max_drawdown
         self.short_spread = short_spread
         self.short_ttp = short_ttp
+        self.short_max_drawdown = short_max_drawdown
         self.pairs = pairs
         self.log_every = log_every
+        self.max_drawdown = max_drawdown
         # initialize multi-core threads
         ne.set_vml_num_threads(8)
         # initialize running metrics
@@ -38,7 +45,7 @@ class Strategy():
     def scout(self, dataframe: pd.DataFrame) -> Union[Signal, None]:
         raise NotImplementedError()
     
-    def layer2(self, base: str, quote: str, data: dict) :
+    def layer2(self, base: str, quote: str, data: dict):
         """ Connect to layer 2 and inference to specific model. 
 
             Parameters
@@ -49,16 +56,75 @@ class Strategy():
                 The quote symbol of the ticker.
             data: `dict`
                 Dictionary containing list of klines.
+            
+            Returns
+            -------
+            `(float, int, int, str, str)`
+                If prediction is successful it will return the
+                percentage spread, direction, the number of n-tick
+                predicted forward, the base pair and the quote pair.
         """
-        result = predict(endpoint=self.endpoint, base=base, 
-            quote=quote, data=data)
+        result = predict(endpoint=self.endpoint, base=base, quote=quote, data=data)
+        # if prediction fails return nones
         if not result: return None, None, None, base, quote
+        # retrieve the predictions dictionary only
         pred = result['predictions']
+        # if maximum drawdown strategy is selected and model retrieve
+        # the percentage prediction spreads for each timestep.
+        if self.max_drawdown and 'percentage_arr' in pred:
+            percentage_spread, direction = self.select_direction(pred['percentage_arr'])
+            return (
+                float(percentage_spread) if percentage_spread else None,
+                int(direction) if direction else None,
+                int(pred['n_tick_forward']),
+                str(result['base']), 
+                str(result['quote'])
+            )
         return (float(pred['percentage_spread']), 
             int(pred['direction']), 
             int(pred['n_tick_forward']),
             str(result['base']), 
             str(result['quote']))
+    
+    def select_direction(self, percentage_arr: list) -> Tuple[float, float]:
+        """ Function to select the trade direction based on the
+            percentage spread array, bet threshold and safety deviation.
+            
+            Parameters
+            -----------
+            percentage_arr: `list`
+                list of all of the percentage spread
+
+            Returns
+            --------
+            `(float, float)`
+                The percentage spread predicted by the model and the 
+                direction predicted by the model in integer format
+                0 being short and 1 being long. Will also return `None, None`
+                if no prediction spread and direction is expected.
+        """
+        predicted_spread = np.array(percentage_arr)
+        max_pred = np.max(percentage_arr)
+        min_pred = np.min(percentage_arr)
+        # long-tendency if max_pred > bet_threshold
+        margin_long = max_pred - self.long_spread    
+        # short-tendency if min_pred < -bet_threshold
+        margin_short = min_pred + self.short_spread  
+        # Option: LONG only
+        if (margin_long > 0) and (margin_short > 0): direction = 'long'
+        # Option: SHORT only
+        elif (margin_long < 0) and (margin_short < 0): direction = 'short'
+        # Option: Available for both LONG and SHORT
+        elif margin_long > 0 and margin_short < 0:
+            direction = 'short' if np.abs(margin_short) > np.abs(margin_long) else 'long'
+        else: direction = None
+        # ensure that within predicted spreads it will not move
+        # above the allowed maximum drawdowns from both directions
+        if direction == 'long' and all(predicted_spread > (-1 * self.long_max_drawdown)):
+            return float(np.abs(max_pred)), 1
+        elif direction == 'short' and all(predicted_spread < self.short_max_drawdown):
+            return float(np.abs(min_pred)), 0
+        return None, None
     
     def save_metrics(self, start: float, symbol: str):
         """ Will save metrics of running specific symbol.
@@ -114,10 +180,13 @@ class SuperTrendSqueeze(Strategy):
                  endpoint: str,
                  long_spread: float,
                  long_ttp: float,
+                 long_max_drawdown: float,
                  short_spread: float,
                  short_ttp: float,
+                 short_max_drawdown: float,
                  pairs: dict,
-                 log_every: int):
+                 log_every: int,
+                 max_drawdown: bool):
         """ Initialize SuperTrendSqueeze class with specified spread & take profit
             percentage thresholds.
 
@@ -129,14 +198,20 @@ class SuperTrendSqueeze(Strategy):
                 The longing spread required from layer 2 prediction.
             long_ttp: `float`
                 The long signal take profit percentage to take from the signal.
+            long_max_drawdown: `float`
+                The maximum allowable drawdown on a given long signal.
             short_spread: `float`
                 The shorting spread required from layer 2 prediction.
             short_ttp: `float`
                 The short signal take profit percentage to take from the signal.
+            short_max_drawdown: `float`
+                The maximum allowable drawdown on a given short signal.
             pairs: `dict`
                 A dictionary of `long` and `short` pairs allowed to scout.
             log_every: `int`
                 Log the metrics from layer 2 every n-iteration.
+            max_drawdown: `bool`
+                True if maximum drawdown strategy.
         """
         super().__init__(
             name="SUPERTREND_SQUEEZE", 
@@ -144,10 +219,13 @@ class SuperTrendSqueeze(Strategy):
             endpoint=endpoint,
             long_spread=long_spread,
             long_ttp=long_ttp,
+            long_max_drawdown=long_max_drawdown,
             short_spread=short_spread,
             short_ttp=short_ttp,
+            short_max_drawdown=short_max_drawdown,
             pairs=pairs,
-            log_every=log_every)
+            log_every=log_every,
+            max_drawdown=max_drawdown)
         # in this class we will be using
         # lazybear's momentum squeeze, ema 99
         # supertrend and sma for technical analysis

@@ -7,6 +7,7 @@ from kaihft.engines import SignalEngine
 def main(exchange: str,
          strategy: str,
          production: bool,
+         max_drawdown: bool,
          exp0a: bool,
          exp1a: bool,
          log_every: int,
@@ -22,6 +23,8 @@ def main(exchange: str,
             A limited strategy choices to run.
         production: `bool`
             if `True` publisher will publish to production topic.
+        max_drawdown; `bool`
+            if `True` max drawdown integrated to strategy.
         exp0a: `bool`
             if `True` publisher will publish to exp0a topic.
         exp1a: `bool`
@@ -48,6 +51,7 @@ def main(exchange: str,
     archive_topic_path = f'{path}-signal-{exchange}-{version}'
     database_ref = f"{path}/signals"
     thresholds_ref = f"{path}/thresholds"
+    max_drawdowns_ref = f"{path}/max_drawdowns"
     pairs_ref = f"{path}/pairs"
     logging.warn(f"[{mode}-mode] strategy: BINANCE-SPOT-{strategy}"
         f"paths: ticker: {ticker_topic_path}, klines: {klines_topic_path},"
@@ -69,6 +73,7 @@ def main(exchange: str,
         database=database,
         database_ref=database_ref,
         thresholds_ref=thresholds_ref,
+        max_drawdowns_ref=max_drawdowns_ref,
         pairs_ref=pairs_ref,
         archive_topic_path=archive_topic_path,
         dist_topic_path=dist_topic_path,
@@ -79,6 +84,7 @@ def main(exchange: str,
         log_every=log_every,
         log_metrics_every=log_metrics_every,
         strategy=strategy,
+        max_drawdown=max_drawdown,
         endpoint=endpoint)
     # run the engine!
     signal_engine.run()

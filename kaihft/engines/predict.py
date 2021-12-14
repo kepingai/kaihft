@@ -88,16 +88,23 @@ def predict(endpoint: str, base: str, quote: str, data: dict) -> Union[dict, Non
         Example
         -------
         >>> {
-        ...    'base': 'UNI',                                # base symbol
-        ...    'interval': '15m',                            # interval of symbol
-        ...    'predictions': {        
-        ...        'direction': 0,                           # 1 = long and 0 = short
-        ...        'n_tick_forward': 8,                      # forecasted n forward
-        ...        'percentage_spread': 0.16193726658821106  # spread in percentage
-        ...    },
-        ...    'success': True,                              # validator    
-        ...    'timestamp': 1631646484.79271                 # utc timestamp
-        ... }
+        ...        'base': 'UNI',                               # base pair
+        ...        'interval': '15m',                           # interval timeframe
+        ...        'predictions': {                     
+        ...            'direction': 0,                          # 1 = long and 0 = short
+        ...            'n_tick_forward': 4,                     # forecasted n forward
+        ...            'percentage_arr': [                      # series predictions
+        ...                -0.29120445251464844,
+        ...                -0.30862805247306824,
+        ...                -0.3237372040748596,
+        ...                -0.3499438464641571
+        ...            ],
+        ...            'percentage_spread': 0.3499438464641571  # spread in percentage
+        ...       },
+        ...        'quote': 'USDT',                             # quote pair
+        ...        'success': True,                             # validator    
+        ...        'timestamp': 1639512483.083822               # utc timestamp
+        ...    }
     """
     job_id = "0A"
     base_url = f"https://us-central1-keping-ai-continuum.cloudfunctions.net/{endpoint}"

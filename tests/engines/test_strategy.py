@@ -54,9 +54,13 @@ def test_strategy():
         endpoint='predict_15m',
         long_spread=0.15, 
         long_ttp=0.15,
+        long_max_drawdown=0.6,
         short_spread=0.15,
         short_ttp=0.15,
-        log_every=100)
+        short_max_drawdown=0.6,
+        pairs=dict(long=['ZECUSDT', 'ETHUSDT'], short=['ZECUSDT', 'ETHUSDT']),
+        log_every=100,
+        max_drawdown=False)
     
     # get ZEC short signal
     client = Client("","")
