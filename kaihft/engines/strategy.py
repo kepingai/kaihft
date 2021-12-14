@@ -230,7 +230,7 @@ class SuperTrendSqueeze(Strategy):
         # lazybear's momentum squeeze, ema 99
         # supertrend and sma for technical analysis
         self.ema, self.supertrend_len = 99, 24
-        self.supertrend_mul, self.sma = 1.0, 20
+        self.supertrend_mul, self.sma = 0.9, 20
         self.technical_analysis = [
             {
                 "kind": "squeeze", 
