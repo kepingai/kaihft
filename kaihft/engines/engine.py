@@ -109,6 +109,8 @@ class SignalEngine():
         self.listener_max_drawdowns = None
         self.endpoint = endpoint
         self.strategy = self._get_strategy(strategy, self.thresholds)
+        # at this moment the maximum volatility is static to 10%
+        self.max_volatility = 0.1
     
     def run(self):
         """ Will run signal engine concurrently, 
@@ -424,23 +426,27 @@ class SignalEngine():
             # format the dataframe appropriately
             dataframe = pd.DataFrame(klines)
             dataframe = self.format_dataframe(dataframe)
-            # run technical analysis & inference to layer 2,
-            # await for futures before the remaining tasks.
-            signal = self.strategy.scout(
-                base=base, 
-                quote=quote,
-                dataframe=dataframe, 
-                callback=self.close_signal)
-            # if signal is triggered
-            if signal and signal.symbol not in self.signals: 
-                # save the signal to class attrs
-                self.signals[symbol] = signal
-                # distribute the signal
-                self.distribute_signal(signal)
-                # archive the signal
-                self.archive_signal(signal)
-                # update/set engine state in real-time
-                self.set_enging_state()                 
+            # ignore highly volatile movements
+            # this will help layer2's ability for 
+            # predicting stationaire market prices
+            if self.is_valid_volatility(dataframe): 
+                # run technical analysis & inference to layer 2,
+                # await for futures before the remaining tasks.
+                signal = self.strategy.scout(
+                    base=base, 
+                    quote=quote,
+                    dataframe=dataframe, 
+                    callback=self.close_signal)
+                # if signal is triggered
+                if signal and signal.symbol not in self.signals: 
+                    # save the signal to class attrs
+                    self.signals[symbol] = signal
+                    # distribute the signal
+                    self.distribute_signal(signal)
+                    # archive the signal
+                    self.archive_signal(signal)
+                    # update/set engine state in real-time
+                    self.set_enging_state()                 
         except Exception as e:
             logging.error(f"[strategy] Exception caught running-strategy, "
                 f"symbol:-{symbol}, error: {e}")
@@ -450,6 +456,36 @@ class SignalEngine():
             # ensure that the symbol is removed
             # from scouts so that there will be no locks.
             self.scouts.remove(symbol)
+    
+    def is_valid_volatility(self, dataframe: pd.DataFrame) -> bool:
+        """ Will check if current volatility is suitable for layer 2.
+
+            Parameters
+            ----------
+            dataframe: `pd.DataFrame`
+                Dataframe containing klines of n-ticks.
+            
+            Returns
+            -------
+            `bool`
+                Return `True` only if volatility does not exceed
+                the allowed volatility for layer2.
+        """
+        # retrieve the OHLC
+        open_price = dataframe.iloc[-1].open
+        high_price = dataframe.iloc[-1].high
+        low_price = dataframe.iloc[-1].low
+        close_price = dataframe.iloc[-1].close
+        # check if current kline is pumping or dumping
+        # and if the pump or dump is above maxmimum volatility
+        # this current market is not valid for layer 2
+        if close_price > open_price:
+            if (abs(high_price - open_price) / open_price) >= self.max_volatility:
+                return False
+        elif close_price < open_price:
+            if (abs(open_price - low_price) / open_price) >= self.max_volatility:
+                return False
+        return True
 
     def close_signal(self, signal: Signal):
         """ A callback function that will 
