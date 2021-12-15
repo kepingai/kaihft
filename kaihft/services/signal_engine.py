@@ -1,5 +1,6 @@
 import logging
 from kaihft.databases import KaiRealtimeDatabase
+from kaihft.engines.strategy import StrategyType
 from kaihft.publishers.client import KaiPublisherClient
 from kaihft.subscribers.client import KaiSubscriberClient
 from kaihft.engines import SignalEngine
@@ -7,7 +8,6 @@ from kaihft.engines import SignalEngine
 def main(exchange: str,
          strategy: str,
          production: bool,
-         max_drawdown: bool,
          exp0a: bool,
          exp1a: bool,
          log_every: int,
@@ -23,8 +23,6 @@ def main(exchange: str,
             A limited strategy choices to run.
         production: `bool`
             if `True` publisher will publish to production topic.
-        max_drawdown; `bool`
-            if `True` max drawdown integrated to strategy.
         exp0a: `bool`
             if `True` publisher will publish to exp0a topic.
         exp1a: `bool`
@@ -40,6 +38,11 @@ def main(exchange: str,
         log_metrics_every: `int`
             Log layer 2 inference metrics every.
     """
+    # ensure that strategy is valid before starting the signal engine
+    try: strategy = StrategyType(strategy)
+    except Exception as e:
+        logging.error(f"[strategy] strategy: {strategy} is not valid!")
+        raise e
     # retrieve the appropriate paths for topics and database references
     if production: path='prod'; endpoint="predict_15m"; mode="production"
     elif exp0a: path='exp0a'; endpoint="EXP0A_predict_15m"; mode="experiment-0a"
@@ -84,7 +87,6 @@ def main(exchange: str,
         log_every=log_every,
         log_metrics_every=log_metrics_every,
         strategy=strategy,
-        max_drawdown=max_drawdown,
         endpoint=endpoint)
     # run the engine!
     signal_engine.run()

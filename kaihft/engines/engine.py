@@ -6,7 +6,7 @@ from kaihft.databases import KaiRealtimeDatabase
 from kaihft.publishers.client import KaiPublisherClient
 from kaihft.subscribers.client import KaiSubscriberClient
 from kaihft.alerts.exceptions import RestartPodException
-from .strategy import get_strategy, Strategy
+from .strategy import StrategyType, get_strategy, Strategy
 from .signal import init_signal_from_rtd, Signal
 
 class SignalEngine():
@@ -28,8 +28,7 @@ class SignalEngine():
         subscriptions_params: dict,
         log_every: int,
         log_metrics_every: int,
-        strategy: str = 'STS',
-        max_drawdown: bool = False,
+        strategy: StrategyType = StrategyType.SUPER_TREND_SQUEEZE,
         endpoint: str = 'predict_15m'):
         """ Will initialize the signal engine
             to scout for potential actionable intelligence
@@ -67,8 +66,6 @@ class SignalEngine():
                 Log layer 2 inference metrics every.
             strategy: `str`
                 The strategy to run, default to STS.
-            max_drawdown: `bool`
-                If `True` maximum drawdown integrated to strategy.
             endpoint: `str`
                 The end point for layer 2 connection.
 
@@ -102,8 +99,8 @@ class SignalEngine():
         self.log_metrics_every = log_metrics_every
         self.ticker_counts = 1
         self.klines_counts = 1
-        self.max_drawdown = max_drawdown
         # the initialization should be in this order
+        self.strategy_type = strategy
         self.max_drawdowns = self._get_max_drawdowns()
         self.thresholds = self._get_thresholds()
         self.pairs = self._get_pairs()
@@ -197,7 +194,7 @@ class SignalEngine():
             callback: `callable`
                 A function to callback to listen for events.
         """
-        if self.max_drawdown:
+        if self.strategy_type == StrategyType.MAX_DRAWDOWN_SQUEEZE:
             self.listener_max_drawdowns = self.database.listen(
                 reference=self.max_drawdowns_ref,
                 callback=callback
@@ -608,17 +605,17 @@ class SignalEngine():
             `ValueError`
                 will raise if data structure does not match production.
         """
-        if not self.max_drawdown: 
-            logging.info(f"[max-drawdowns] not using max-drawdowns")    
-            return None
-        logging.info(f"[get] retrieving-drawdowns from signal database.")
-        max_drawdowns = self.database.get(self.max_drawdowns_ref)
-        if 'long' not in max_drawdowns or 'short' not in max_drawdowns:
-            raise ValueError(f"Max Drawdowns required `long` and `short`, instead got: {max_drawdowns.keys()}")
-        logging.info(f"[get] retrieved-max drawdowns: {max_drawdowns} from database.")
-        return dict(long=float(max_drawdowns['long']), 
-            short=float(max_drawdowns['short']))
-    
+        if self.strategy_type == StrategyType.MAX_DRAWDOWN_SQUEEZE: 
+            logging.info(f"[get] retrieving-drawdowns from signal database.")
+            max_drawdowns = self.database.get(self.max_drawdowns_ref)
+            if 'long' not in max_drawdowns or 'short' not in max_drawdowns:
+                raise ValueError(f"Max Drawdowns required `long` and `short`, instead got: {max_drawdowns.keys()}")
+            logging.info(f"[get] retrieved-max drawdowns: {max_drawdowns} from database.")
+            return dict(long=float(max_drawdowns['long']), 
+                short=float(max_drawdowns['short']))
+        logging.info(f"[max-drawdowns] not using max-drawdowns")    
+        return None
+
     def _get_thresholds(self) -> dict:
         """ Will retrieve the thresholds for layer1.
             
@@ -694,14 +691,26 @@ class SignalEngine():
             `KeyError`
                 If key id not match or strategy not available.
         """
-        return get_strategy(strategy)(
-            endpoint=self.endpoint,
-            long_spread=thresholds['long']['bet_threshold'],
-            long_ttp=thresholds['long']['ttp_threshold'],
-            long_max_drawdown=self.max_drawdowns['long'] if self.max_drawdown else None,
-            short_spread=thresholds['short']['bet_threshold'],
-            short_ttp=thresholds['short']['ttp_threshold'],
-            short_max_drawdown=self.max_drawdowns['long'] if self.max_drawdown else None,
-            pairs=self.pairs,
-            log_every=self.log_metrics_every,
-            max_drawdown=self.max_drawdown)
+        strategy_class = get_strategy(strategy)
+        if self.strategy_type == StrategyType.SUPER_TREND_SQUEEZE:
+            return strategy_class(
+                endpoint=self.endpoint,
+                long_spread=thresholds['long']['bet_threshold'],
+                long_ttp=thresholds['long']['ttp_threshold'],
+                short_spread=thresholds['short']['bet_threshold'],
+                short_ttp=thresholds['short']['ttp_threshold'],
+                pairs=self.pairs,
+                log_every=self.log_metrics_every)
+        elif self.strategy_type == StrategyType.MAX_DRAWDOWN_SQUEEZE:
+            return strategy_class(
+                endpoint=self.endpoint,
+                long_spread=thresholds['long']['bet_threshold'],
+                long_ttp=thresholds['long']['ttp_threshold'],
+                long_max_drawdown=self.max_drawdowns['long'],
+                short_spread=thresholds['short']['bet_threshold'],
+                short_ttp=thresholds['short']['ttp_threshold'],
+                short_max_drawdown=self.max_drawdowns['short'],
+                pairs=self.pairs,
+                log_every=self.log_metrics_every)
+        else:
+            raise ValueError(f"[strategy] strategy type: {self.strategy_type} not valid!")

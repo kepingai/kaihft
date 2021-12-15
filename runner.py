@@ -52,22 +52,20 @@ def klines_binance_spot(klines, production, exp0a, exp1a):
         exp1a=exp1a)
 
 @cli.command()
-@click.option('--strategy', default="STS", help="Available strategies: 'STS'")
+@click.option('--strategy', default="SUPER_TREND_SQUEEZE", help="Available strategies: [SUPERTREND_SQUEEZE, MAX_DRAWDOWN_SQUEEZE]")
 @click.option('--version', default='v0', help="The version of signal engine.")
 @click.option('--log-every', default=1000, help="Log cloud pub/sub messages every.")
 @click.option('--log-metrics-every', default=100, help="Log layer2 metrics every.")
 @click.option('--production', is_flag=True, help='Publish & subscribe messages to production topic.')
-@click.option('--max-drawdown', is_flag=True, help='Maximum drawdown to strategies.')
 @click.option('--exp0a', is_flag=True, help='Publish & subscribe messages to exp0a topic.')
 @click.option('--exp1a', is_flag=True, help='Publish & subscribe messages to exp1a topic.')
 @notify_failure
 def signal_binance_spot(strategy, version, log_every, log_metrics_every, 
-    production, max_drawdown, exp0a, exp1a):
+    production, exp0a, exp1a):
     services.signal_engine.main(
         exchange='binance',
         strategy=strategy,
         production=production,
-        max_drawdown=max_drawdown,
         exp0a=exp0a,
         exp1a=exp1a,
         version=version,

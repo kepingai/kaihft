@@ -2,7 +2,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from binance.client import Client
 from pytz import timezone
-from kaihft.engines.strategy import SuperTrendSqueeze
+from kaihft.engines.strategy import SuperTrendSqueeze, MaxDrawdownSqueeze
 
 def to_dataframe(base: str, klines: list, quote: str, interval: str) -> pd.DataFrame:
     """ Will convert klines from binance to dataframe.
@@ -50,7 +50,18 @@ eth_short_timestamp = 1635102000
 def test_strategy():
     # initialize strategy with very low spread
     # long and short to ensure that signal creation.
-    strategy = SuperTrendSqueeze(
+    super_trend_squeeze = SuperTrendSqueeze(
+        endpoint='predict_15m',
+        long_spread=0.15, 
+        long_ttp=0.15,
+        short_spread=0.15,
+        short_ttp=0.15,
+        pairs=dict(long=['ZECUSDT', 'ETHUSDT'], short=['ZECUSDT', 'ETHUSDT']),
+        log_every=100)
+    
+    # initialize strategy with very low spread
+    # long and short to ensure that signal creation.
+    max_drawdown_squeeze = MaxDrawdownSqueeze(
         endpoint='predict_15m',
         long_spread=0.15, 
         long_ttp=0.15,
@@ -59,50 +70,50 @@ def test_strategy():
         short_ttp=0.15,
         short_max_drawdown=0.6,
         pairs=dict(long=['ZECUSDT', 'ETHUSDT'], short=['ZECUSDT', 'ETHUSDT']),
-        log_every=100,
-        max_drawdown=False)
+        log_every=100)
     
-    # get ZEC short signal
-    client = Client("","")
-    base = 'ZEC'
-    quote = 'USDT'
-    end = datetime.fromtimestamp(zec_long_timestamp)
-    start = (end - timedelta(minutes=(15 * 250))).timestamp()
-    klines = client.get_historical_klines(
-        f"{base}{quote}".upper(),
-        client.KLINE_INTERVAL_15MINUTE,
-        start_str=str(start),
-        end_str=str(datetime.fromtimestamp(zec_long_timestamp)))
-    df = to_dataframe(base, klines, quote, '15m')
-    # ensure that short signal is created
-    signal = strategy.scout(
-        base=base, 
-        quote=quote, 
-        dataframe=df, 
-        callback=lambda x:x)
-    # at this point we can't guarantee that model will
-    # predict the direction will be long but if so
-    if signal: assert signal.direction == 1
-    
-    # get ETH short signal
-    client = Client("","")
-    base = 'ETH'
-    quote = 'USDT'
-    end = datetime.fromtimestamp(eth_short_timestamp)
-    start = (end - timedelta(minutes=(15 * 250))).timestamp()
-    klines = client.get_historical_klines(
-        f"{base}{quote}".upper(),
-        client.KLINE_INTERVAL_15MINUTE,
-        start_str=str(start),
-        end_str=str(datetime.fromtimestamp(eth_short_timestamp)))
-    df = to_dataframe(base, klines, quote, '15m')
-    # ensure that short signal is created
-    signal = strategy.scout(
-        base=base, 
-        quote=quote, 
-        dataframe=df, 
-        callback=lambda x:x)
-    # at this point we can't guarantee that model will
-    # predict the direction will be shorting but if so 
-    if signal: assert signal.direction == 0
-    
+    # test both strategy
+    for strategy in [super_trend_squeeze, max_drawdown_squeeze]:
+        # get ZEC short signal
+        client = Client("","")
+        base = 'ZEC'
+        quote = 'USDT'
+        end = datetime.fromtimestamp(zec_long_timestamp)
+        start = (end - timedelta(minutes=(15 * 250))).timestamp()
+        klines = client.get_historical_klines(
+            f"{base}{quote}".upper(),
+            client.KLINE_INTERVAL_15MINUTE,
+            start_str=str(start),
+            end_str=str(datetime.fromtimestamp(zec_long_timestamp)))
+        df = to_dataframe(base, klines, quote, '15m')
+        # ensure that short signal is created
+        signal = strategy.scout(
+            base=base, 
+            quote=quote, 
+            dataframe=df, 
+            callback=lambda x:x)
+        # at this point we can't guarantee that model will
+        # predict the direction will be long but if so
+        if signal: assert signal.direction == 1
+        
+        # get ETH short signal
+        client = Client("","")
+        base = 'ETH'
+        quote = 'USDT'
+        end = datetime.fromtimestamp(eth_short_timestamp)
+        start = (end - timedelta(minutes=(15 * 250))).timestamp()
+        klines = client.get_historical_klines(
+            f"{base}{quote}".upper(),
+            client.KLINE_INTERVAL_15MINUTE,
+            start_str=str(start),
+            end_str=str(datetime.fromtimestamp(eth_short_timestamp)))
+        df = to_dataframe(base, klines, quote, '15m')
+        # ensure that short signal is created
+        signal = strategy.scout(
+            base=base, 
+            quote=quote, 
+            dataframe=df, 
+            callback=lambda x:x)
+        # at this point we can't guarantee that model will
+        # predict the direction will be shorting but if so 
+        if signal: assert signal.direction == 0

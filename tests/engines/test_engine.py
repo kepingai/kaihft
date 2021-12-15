@@ -1,9 +1,9 @@
 import os, asyncio, json
 from datetime import datetime
 import firebase_admin
-from google.cloud import pubsub_v1
 from kaihft.engines import SignalEngine
 from kaihft.databases import KaiRealtimeDatabase
+from kaihft.engines.strategy import StrategyType
 from kaihft.publishers.client import KaiPublisherClient
 from kaihft.subscribers.client import KaiSubscriberClient
 
@@ -34,7 +34,7 @@ signal_engine = SignalEngine(
         klines=dict(id='dev-klines-binance-v0-sub', timeout=None)),
     log_every=1000,
     log_metrics_every=1000,
-    strategy='STS')
+    strategy=StrategyType.SUPER_TREND_SQUEEZE)
 
 def test_listen_thresholds():
     def callback(event):
