@@ -95,6 +95,7 @@ def test_strategy():
         # at this point we can't guarantee that model will
         # predict the direction will be long but if so
         if signal: assert signal.direction == 1
+
         
         # get ETH short signal
         client = Client("","")
@@ -117,3 +118,12 @@ def test_strategy():
         # at this point we can't guarantee that model will
         # predict the direction will be shorting but if so 
         if signal: assert signal.direction == 0
+
+    # test select direction
+    shorting = [-0.6200340390205383,
+        -0.7400986552238464,
+        -0.7209125757217407,
+        -0.6443493366241455]
+    spread, dir = max_drawdown_squeeze.select_direction(shorting)
+    assert dir == 0
+    assert spread == 0.7400986552238464

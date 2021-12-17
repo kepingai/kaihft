@@ -94,8 +94,8 @@ class Strategy():
             if 'percentage_arr' not in pred: return None, None, None, base, quote
             percentage_spread, direction = self.select_direction(pred['percentage_arr'])
             return (
-                float(percentage_spread) if percentage_spread else None,
-                int(direction) if direction else None,
+                percentage_spread,
+                direction,
                 int(pred['n_tick_forward']),
                 str(result['base']), 
                 str(result['quote'])
