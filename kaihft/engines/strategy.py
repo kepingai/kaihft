@@ -474,6 +474,7 @@ class MaxDrawdownSqueeze(Strategy):
         # retrieve the necessary indicators
         squeeze = ta_dataframe.iloc[-1].SQZ_OFF
         last_price = ta_dataframe.iloc[-1].close
+        pair = f"{base}{quote}".upper()
         ttp = 0
         # check if squeeze is off
         if squeeze == 1:
@@ -484,12 +485,9 @@ class MaxDrawdownSqueeze(Strategy):
             if _spread is None or _direction is None: return None
             # ensure that direction and spread prediction
             # is above specified spread for layer 1
-            if _direction == 1 and _spread >= self.long_spread: ttp = self.long_ttp
-            elif _direction == 0 and _spread >= self.short_spread: ttp = self.short_ttp
-            else: 
-                logging.error(f"[scout] error getting direction: {_direction}, "
-                    f"spread: {_spread}, pair: {base}/{quote}")
-                return None
+            if _direction == 1 and pair in self.pairs['long']: ttp = self.long_ttp
+            elif _direction == 0 and pair in self.pairs['short']: ttp = self.short_ttp
+            else: return None
             signal = True
             # record the ending time of analysis
             self.save_metrics(start, f"{base}/{quote}")
