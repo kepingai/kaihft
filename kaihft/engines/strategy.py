@@ -679,7 +679,8 @@ class MaxDrawdownSqueeze(Strategy):
 
 __REGISTRY = {
     str(StrategyType.SUPER_TREND_SQUEEZE): SuperTrendSqueeze,
-    str(StrategyType.MAX_DRAWDOWN_SQUEEZE): MaxDrawdownSqueeze
+    str(StrategyType.MAX_DRAWDOWN_SQUEEZE): MaxDrawdownSqueeze,
+    str(StrategyType.MAX_DRAWDOWN_SPREAD): MaxDrawdownSpread
 }
 
 def get_strategy(strategy: StrategyType) -> Union[Strategy, None]:
