@@ -503,7 +503,7 @@ class MaxDrawdownSpread(Strategy):
         low_price = clean_df.iloc[-1].low
         last_price = clean_df.iloc[-1].close
         # get the current tick spread
-        tick_spread = abs(high_price - low_price)
+        tick_spread = abs((high_price - low_price) / low_price) * 100
         minimum_spread = min(self.long_ttp, self.short_ttp)
         pair = f"{base}{quote}".upper()
         ttp = 0
