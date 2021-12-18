@@ -2,7 +2,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from binance.client import Client
 from pytz import timezone
-from kaihft.engines.strategy import SuperTrendSqueeze, MaxDrawdownSqueeze
+from kaihft.engines.strategy import MaxDrawdownSpread, SuperTrendSqueeze, MaxDrawdownSqueeze
 
 def to_dataframe(base: str, klines: list, quote: str, interval: str) -> pd.DataFrame:
     """ Will convert klines from binance to dataframe.
@@ -72,8 +72,22 @@ def test_strategy():
         pairs=dict(long=['ZECUSDT', 'ETHUSDT'], short=['ZECUSDT', 'ETHUSDT']),
         log_every=100)
     
+    # initialize strategy with very low spread
+    # long and short to ensure that signal creation.
+    max_drawdown_spread = MaxDrawdownSpread(
+        endpoint='predict_15m',
+        long_spread=0.15, 
+        long_ttp=0.15,
+        long_max_drawdown=0.6,
+        short_spread=0.15,
+        short_ttp=0.15,
+        short_max_drawdown=0.6,
+        pairs=dict(long=['ZECUSDT', 'ETHUSDT'], short=['ZECUSDT', 'ETHUSDT']),
+        log_every=100,
+        buffer=5)
+    
     # test both strategy
-    for strategy in [super_trend_squeeze, max_drawdown_squeeze]:
+    for strategy in [super_trend_squeeze, max_drawdown_squeeze, max_drawdown_spread]:
         # get ZEC short signal
         client = Client("","")
         base = 'ZEC'

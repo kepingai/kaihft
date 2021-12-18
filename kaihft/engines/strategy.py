@@ -405,7 +405,7 @@ class MaxDrawdownSpread(Strategy):
             buffer: `int`
                 The buffer time before next inference of a symbol.
         """
-        super(MaxDrawdownSqueeze, self).__init__(
+        super(MaxDrawdownSpread, self).__init__(
             name=str(StrategyType.MAX_DRAWDOWN_SQUEEZE),
             strategy=StrategyType.MAX_DRAWDOWN_SQUEEZE,
             description="Maximum drawdown x Squeeze Long vs. Short strategy.",
