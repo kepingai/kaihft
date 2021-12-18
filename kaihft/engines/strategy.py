@@ -89,7 +89,7 @@ class Strategy():
         # retrieve the predictions dictionary only
         pred = result['predictions']
         # conduct strategy based upon strategy type
-        if self.strategy == StrategyType.MAX_DRAWDOWN_SQUEEZE:
+        if 'MAX_DRAWDOWN' in str(self.strategy).upper():
             # ensure that there's percentage array in the prediction
             # note that only some of the models has this integrated
             if 'percentage_arr' not in pred: return None, None, None, base, quote
@@ -406,9 +406,9 @@ class MaxDrawdownSpread(Strategy):
                 The buffer time before next inference of a symbol.
         """
         super(MaxDrawdownSpread, self).__init__(
-            name=str(StrategyType.MAX_DRAWDOWN_SQUEEZE),
-            strategy=StrategyType.MAX_DRAWDOWN_SQUEEZE,
-            description="Maximum drawdown x Squeeze Long vs. Short strategy.",
+            name=str(StrategyType.MAX_DRAWDOWN_SPREAD),
+            strategy=StrategyType.MAX_DRAWDOWN_SPREAD,
+            description="Maximum Drawdown x Spread Long vs. Short strategy.",
             endpoint=endpoint,
             long_spread=long_spread,
             long_ttp=long_ttp,
@@ -504,7 +504,7 @@ class MaxDrawdownSpread(Strategy):
         last_price = clean_df.iloc[-1].close
         # get the current tick spread
         tick_spread = abs(high_price - low_price)
-        minimum_spread = min(self.long_spread, self.short_spread)
+        minimum_spread = min(self.long_ttp, self.short_ttp)
         pair = f"{base}{quote}".upper()
         ttp = 0
         # ensure that the current tick spread is above the minimum
@@ -578,7 +578,7 @@ class MaxDrawdownSqueeze(Strategy):
         super(MaxDrawdownSqueeze, self).__init__(
             name=str(StrategyType.MAX_DRAWDOWN_SQUEEZE),
             strategy=StrategyType.MAX_DRAWDOWN_SQUEEZE,
-            description="Maximum drawdown x Squeeze Long vs. Short strategy.",
+            description="Maximum Drawdown x Squeeze Long vs. Short strategy.",
             endpoint=endpoint,
             long_spread=long_spread,
             long_ttp=long_ttp,
