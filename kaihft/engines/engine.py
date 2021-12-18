@@ -19,6 +19,7 @@ class SignalEngine():
         database_ref: str, 
         thresholds_ref: str,
         max_drawdowns_ref: str,
+        buffers_ref: str,
         pairs_ref: str,
         archive_topic_path: str,
         dist_topic_path: str,
@@ -48,6 +49,8 @@ class SignalEngine():
                 A string of database reference path to thresholds config.
             max_drawdowns_ref: `str`
                 A string of database reference path to maximum drawdowns.
+            buffers_ref: `str`
+                A string of database reference path to buffers.
             archive_topic_path: `str`
                 Is the signal archiving topic path for new and closed signals.
             dist_topic_path: `str`
@@ -87,6 +90,7 @@ class SignalEngine():
         self.database_ref = database_ref
         self.thresholds_ref = thresholds_ref
         self.max_drawdowns_ref = max_drawdowns_ref
+        self.buffers_ref = buffers_ref
         self.pairs_ref = pairs_ref
         self.archive_topic_path = archive_topic_path
         self.dist_topic_path = dist_topic_path
@@ -102,6 +106,7 @@ class SignalEngine():
         # the initialization should be in this order
         self.strategy_type = strategy
         self.max_drawdowns = self._get_max_drawdowns()
+        self.buffer = self._get_buffer()
         self.thresholds = self._get_thresholds()
         self.pairs = self._get_pairs()
         self.listener_thresholds = None
@@ -139,7 +144,8 @@ class SignalEngine():
             self.subscribe(self.klines_subscriber, 'klines', self.scout_signals),
             self.listen_thresholds(self._update_thresholds),
             self.listen_pairs(self._update_pairs),
-            self.listen_max_drawdowns(self._update_max_drawdowns)
+            self.listen_max_drawdowns(self._update_max_drawdowns),
+            self.listen_buffers(self._update_buffers)
         )
         with self.ticker_subscriber.client, self.klines_subscriber.client:
             try:
@@ -199,6 +205,20 @@ class SignalEngine():
         if self.strategy_type == StrategyType.MAX_DRAWDOWN_SQUEEZE:
             self.listener_max_drawdowns = self.database.listen(
                 reference=self.max_drawdowns_ref,
+                callback=callback
+            )
+    
+    def listen_buffers(self, callback: callable):
+        """ Will begin subscription to buffers in database. 
+        
+            Parameters
+            ----------
+            callback: `callable`
+                A function to callback to listen for events.
+        """
+        if self.strategy_type == StrategyType.MAX_DRAWDOWN_SPREAD:
+            self.listener_max_drawdowns = self.database.listen(
+                reference=self.buffers_ref,
                 callback=callback
             )
     
@@ -290,6 +310,30 @@ class SignalEngine():
         self.strategy.long_max_drawdown = self.max_drawdowns['long']
         self.strategy.short_max_drawdown = self.max_drawdowns['short']
         logging.info(f"[listen] updated-max drawdown: {self.max_drawdowns}")
+    
+    def _update_buffers(self, event):
+        """ The callback to update new buffers to strategy. 
+
+            Parameters
+            ----------
+            event: `db.Event`
+                This event can access the data, path & event_type
+        """
+        if str(event.event_type) != 'put' or event.data is None: return
+        if str(event.path) != '/': 
+            logging.error("Buffers not updated! Only update it via "
+                f"supervisor's notebook pairs injection!")
+            return
+        buffers = event.data
+        # ensure that inference buffer is in the dictionary
+        if 'inference' not in buffers:
+            logging.error(f"Buffers required `inference`, instead got: {buffers.keys()}")
+            return
+        # update the strategy with the new buffer
+        logging.info(f"[listen] retrieving-buffer from signal database.")
+        self.buffer = int(buffers['inference'])
+        self.strategy.buffer = self.buffer
+        logging.info(f"[listen] updated buffer: {self.buffer}")
     
     async def subscribe(self,
                         subscriber: KaiSubscriberClient,
@@ -429,7 +473,8 @@ class SignalEngine():
             # ignore highly volatile movements
             # this will help layer2's ability for 
             # predicting stationaire market prices
-            if self.is_valid_volatility(dataframe): 
+            symbol = f"{base}{quote}".upper()
+            if self.is_valid_volatility(dataframe) and symbol not in self.signals: 
                 # run technical analysis & inference to layer 2,
                 # await for futures before the remaining tasks.
                 signal = self.strategy.scout(
@@ -438,7 +483,7 @@ class SignalEngine():
                     dataframe=dataframe, 
                     callback=self.close_signal)
                 # if signal is triggered
-                if signal and signal.symbol not in self.signals: 
+                if signal: 
                     # save the signal to class attrs
                     self.signals[symbol] = signal
                     # distribute the signal
@@ -472,20 +517,11 @@ class SignalEngine():
                 the allowed volatility for layer2.
         """
         # retrieve the OHLC
-        open_price = dataframe.iloc[-1].open
         high_price = dataframe.iloc[-1].high
         low_price = dataframe.iloc[-1].low
-        close_price = dataframe.iloc[-1].close
-        # check if current kline is pumping or dumping
-        # and if the pump or dump is above maxmimum volatility
-        # this current market is not valid for layer 2
-        if close_price > open_price:
-            if (abs(high_price - open_price) / open_price) >= self.max_volatility:
-                return False
-        elif close_price < open_price:
-            if (abs(open_price - low_price) / open_price) >= self.max_volatility:
-                return False
-        return True
+        # check if the current kline spread
+        # is not above maximium volatility
+        return abs(high_price - low_price) / low_price < self.max_volatility
 
     def close_signal(self, signal: Signal):
         """ A callback function that will 
@@ -649,7 +685,30 @@ class SignalEngine():
             logging.info(f"[get] retrieved-max drawdowns: {max_drawdowns} from database.")
             return dict(long=float(max_drawdowns['long']), 
                 short=float(max_drawdowns['short']))
-        logging.info(f"[max-drawdowns] not using max-drawdowns")    
+        logging.info(f"[engine] not using max-drawdowns")    
+        return None
+    
+    def _get_buffer(self) -> int:
+        """ Will retrieve the inference buffer time.
+
+            Returns
+            -------
+            `int`
+                The inference buffer time in seconds.
+
+            Raises
+            ------
+            `ValueError`
+                will raise if data structure does not match production.
+        """
+        if self.strategy_type == StrategyType.MAX_DRAWDOWN_SPREAD: 
+            logging.info(f"[get] retrieving-buffer from signal database.")
+            buffers = self.database.get(self.buffers_ref)
+            if 'inference' not in buffers:
+                raise ValueError(f"MaxDrawdownSpread required `inference` instead got: {buffers.keys()}")
+            logging.info(f"[get] retrieved buffers: {buffers} from database.")
+            return int(buffers['inference'])
+        logging.info(f"[engine] not using max-drawdown spread")    
         return None
 
     def _get_thresholds(self) -> dict:
@@ -748,5 +807,17 @@ class SignalEngine():
                 short_max_drawdown=self.max_drawdowns['short'],
                 pairs=self.pairs,
                 log_every=self.log_metrics_every)
+        elif self.strategy_type == StrategyType.MAX_DRAWDOWN_SPREAD:
+            return strategy_class(
+                endpoint=self.endpoint,
+                long_spread=thresholds['long']['bet_threshold'],
+                long_ttp=thresholds['long']['ttp_threshold'],
+                long_max_drawdown=self.max_drawdowns['long'],
+                short_spread=thresholds['short']['bet_threshold'],
+                short_ttp=thresholds['short']['ttp_threshold'],
+                short_max_drawdown=self.max_drawdowns['short'],
+                pairs=self.pairs,
+                log_every=self.log_metrics_every,
+                buffer=self.buffer)
         else:
             raise ValueError(f"[strategy] strategy type: {self.strategy_type} not valid!")

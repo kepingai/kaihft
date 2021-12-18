@@ -55,6 +55,7 @@ def main(exchange: str,
     database_ref = f"{path}/signals"
     thresholds_ref = f"{path}/thresholds"
     max_drawdowns_ref = f"{path}/max_drawdowns"
+    buffers_ref = f"{path}/buffers"
     pairs_ref = f"{path}/pairs"
     logging.warn(f"[{mode}-mode] strategy: BINANCE-SPOT-{strategy}"
         f"paths: ticker: {ticker_topic_path}, klines: {klines_topic_path},"
@@ -77,6 +78,7 @@ def main(exchange: str,
         database_ref=database_ref,
         thresholds_ref=thresholds_ref,
         max_drawdowns_ref=max_drawdowns_ref,
+        buffers_ref=buffers_ref,
         pairs_ref=pairs_ref,
         archive_topic_path=archive_topic_path,
         dist_topic_path=dist_topic_path,
