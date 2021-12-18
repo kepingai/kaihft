@@ -208,7 +208,7 @@ class SignalEngine():
                 callback=callback
             )
     
-    def listen_buffers(self, callback: callable):
+    async def listen_buffers(self, callback: callable):
         """ Will begin subscription to buffers in database. 
         
             Parameters
@@ -677,7 +677,7 @@ class SignalEngine():
             `ValueError`
                 will raise if data structure does not match production.
         """
-        if self.strategy_type == StrategyType.MAX_DRAWDOWN_SQUEEZE: 
+        if 'MAX_DRAWDOWN' in str(self.strategy_type).upper(): 
             logging.info(f"[get] retrieving-drawdowns from signal database.")
             max_drawdowns = self.database.get(self.max_drawdowns_ref)
             if 'long' not in max_drawdowns or 'short' not in max_drawdowns:
