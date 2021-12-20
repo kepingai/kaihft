@@ -52,7 +52,7 @@ def klines_binance_spot(klines, production, exp0a, exp1a):
         exp1a=exp1a)
 
 @cli.command()
-@click.option('--strategy', default="SUPER_TREND_SQUEEZE", help="Available strategies: [SUPERTREND_SQUEEZE, MAX_DRAWDOWN_SQUEEZE, MAX_DRAWDOWN_SPREAD]")
+@click.option('--strategy', default="SUPER_TREND_SQUEEZE", help="Available strategies: [SUPERTREND_SQUEEZE, MAX_DRAWDOWN_SQUEEZE, MAX_DRAWDOWN_SPREAD, MAX_DRAWDOWN_SUPER_TREND_SPREAD]")
 @click.option('--version', default='v0', help="The version of signal engine.")
 @click.option('--log-every', default=1000, help="Log cloud pub/sub messages every.")
 @click.option('--log-metrics-every', default=100, help="Log layer2 metrics every.")
