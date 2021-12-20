@@ -501,6 +501,7 @@ class MaxDrawdownSpread(Strategy):
             'taker_buy_quote_vol', 'datetime', 'ticker', 'interval']]
         high_price = clean_df.iloc[-1].high
         low_price = clean_df.iloc[-1].low
+        open_price = clean_df.iloc[-1].open
         last_price = clean_df.iloc[-1].close
         # get the current tick spread
         tick_spread = abs((high_price - low_price) / low_price) * 100
@@ -518,8 +519,12 @@ class MaxDrawdownSpread(Strategy):
             if _spread is None or _direction is None: return None
             # ensure that direction and spread prediction
             # is above specified spread for layer 1
-            if _direction == 1 and pair in self.pairs['long']: ttp = self.long_ttp
-            elif _direction == 0 and pair in self.pairs['short']: ttp = self.short_ttp
+            if (_direction == 1 and pair in self.pairs['long'] 
+                and last_price > open_price):
+                ttp = self.long_ttp
+            elif (_direction == 0 and pair in self.pairs['short']
+                and last_price < open_price): 
+                ttp = self.short_ttp
             else: return None
             signal = True
             # record the ending time of analysis
