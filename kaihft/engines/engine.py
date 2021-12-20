@@ -1,6 +1,8 @@
 import pandas as pd
+import numpy as np
 import logging, json, asyncio
 from datetime import datetime
+from typing import Union
 from google.cloud import pubsub_v1
 from kaihft.databases import KaiRealtimeDatabase
 from kaihft.publishers.client import KaiPublisherClient
@@ -106,7 +108,7 @@ class SignalEngine():
         # the initialization should be in this order
         self.strategy_type = strategy
         self.max_drawdowns = self._get_max_drawdowns()
-        self.buffer = self._get_buffer()
+        self.buffers = self._get_buffers()
         self.thresholds = self._get_thresholds()
         self.pairs = self._get_pairs()
         self.listener_thresholds = None
@@ -114,8 +116,6 @@ class SignalEngine():
         self.listener_max_drawdowns = None
         self.endpoint = endpoint
         self.strategy = self._get_strategy(strategy, self.thresholds)
-        # at this moment the maximum volatility is static to 10%
-        self.max_volatility = 0.1
     
     def run(self):
         """ Will run signal engine concurrently, 
@@ -326,14 +326,18 @@ class SignalEngine():
             return
         buffers = event.data
         # ensure that inference buffer is in the dictionary
-        if 'inference' not in buffers:
-            logging.error(f"Buffers required `inference`, instead got: {buffers.keys()}")
+        if ('inference' not in buffers or 'max_volatility' not in buffers or
+            'rollback_volatility' not in buffers):
+            logging.error(f"Buffers missing keys: {buffers.keys()}")
             return
         # update the strategy with the new buffer
         logging.info(f"[listen] retrieving-buffer from signal database.")
-        self.buffer = int(buffers['inference'])
-        self.strategy.buffer = self.buffer
-        logging.info(f"[listen] updated buffer: {self.buffer}")
+        # update the current buffers class attribute and
+        # update the strategy inference buffer 
+        self.buffers.update(buffers)
+        if hasattr(self.strategy, 'buffer'):
+            self.strategy.buffer = self.buffers['inference']
+        logging.info(f"[listen] updated buffer: {self.buffers}")
     
     async def subscribe(self,
                         subscriber: KaiSubscriberClient,
@@ -516,12 +520,13 @@ class SignalEngine():
                 Return `True` only if volatility does not exceed
                 the allowed volatility for layer2.
         """
+        rollback = self.buffers['rollback_volatility']
         # retrieve the OHLC
-        high_price = dataframe.iloc[-1].high
-        low_price = dataframe.iloc[-1].low
+        low = np.min(dataframe.iloc[rollback:].low)
+        high = np.max(dataframe.iloc[rollback:].high)
         # check if the current kline spread
         # is not above maximium volatility
-        return abs(high_price - low_price) / low_price < self.max_volatility
+        return abs(high - low) / low < self.buffers['max_volatility']
 
     def close_signal(self, signal: Signal):
         """ A callback function that will 
@@ -686,30 +691,37 @@ class SignalEngine():
             return dict(long=float(max_drawdowns['long']), 
                 short=float(max_drawdowns['short']))
         logging.info(f"[engine] not using max-drawdowns")    
-        return None
+        return dict(long=0.6, short=0.6)
     
-    def _get_buffer(self) -> int:
+    def _get_buffers(self) -> dict:
         """ Will retrieve the inference buffer time.
 
             Returns
             -------
-            `int`
-                The inference buffer time in seconds.
+            `dict`
+                A dictionary of buffers as follows else default buffers
+
+            >>> {
+            ...     "inference": 360,           # the buffer time in sec to inference layer 2
+            ...     "max_volatility": 0.1,      # the % max spread of rollback periods
+            ...     "rollback_volatility": 5    # rollingback klines to check spread
+            ... }
 
             Raises
             ------
             `ValueError`
                 will raise if data structure does not match production.
         """
-        if 'MAX_DRAWDOWN' in str(self.strategy_type).upper(): 
+        if 'MAX_DRAWDOWN' in str(self.strategy_type).upper():
             logging.info(f"[get] retrieving-buffer from signal database.")
             buffers = self.database.get(self.buffers_ref)
-            if 'inference' not in buffers:
-                raise ValueError(f"MaxDrawdownSpread required `inference` instead got: {buffers.keys()}")
+            if ('inference' not in buffers or 'max_volatility' not in buffers 
+                or 'rollback_volatility' not in buffers):
+                raise ValueError(f"MaxDrawdownSpread missing buffers: {buffers.keys()}")
             logging.info(f"[get] retrieved buffers: {buffers} from database.")
-            return int(buffers['inference'])
-        logging.info(f"[engine] not using max-drawdown spread")    
-        return None
+            return buffers
+        logging.info(f"[max drawdown] not using max drawdown.")
+        return dict(inference=60, max_volatility=0.05, rollback_volatility=10)
 
     def _get_thresholds(self) -> dict:
         """ Will retrieve the thresholds for layer1.
@@ -819,6 +831,6 @@ class SignalEngine():
                 short_max_drawdown=self.max_drawdowns['short'],
                 pairs=self.pairs,
                 log_every=self.log_metrics_every,
-                buffer=self.buffer)
+                buffer=self.buffers['inference'])
         else:
             raise ValueError(f"[strategy] strategy type: {self.strategy_type} not valid!")
