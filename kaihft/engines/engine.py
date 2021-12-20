@@ -216,7 +216,7 @@ class SignalEngine():
             callback: `callable`
                 A function to callback to listen for events.
         """
-        if self.strategy_type == StrategyType.MAX_DRAWDOWN_SPREAD:
+        if 'MAX_DRAWDOWN' in str(self.strategy_type).upper():
             self.listener_max_drawdowns = self.database.listen(
                 reference=self.buffers_ref,
                 callback=callback
@@ -701,7 +701,7 @@ class SignalEngine():
             `ValueError`
                 will raise if data structure does not match production.
         """
-        if self.strategy_type == StrategyType.MAX_DRAWDOWN_SPREAD: 
+        if 'MAX_DRAWDOWN' in str(self.strategy_type).upper(): 
             logging.info(f"[get] retrieving-buffer from signal database.")
             buffers = self.database.get(self.buffers_ref)
             if 'inference' not in buffers:
