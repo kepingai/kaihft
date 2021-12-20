@@ -807,7 +807,8 @@ class SignalEngine():
                 short_max_drawdown=self.max_drawdowns['short'],
                 pairs=self.pairs,
                 log_every=self.log_metrics_every)
-        elif self.strategy_type == StrategyType.MAX_DRAWDOWN_SPREAD:
+        elif (self.strategy_type == StrategyType.MAX_DRAWDOWN_SPREAD or 
+              self.strategy_type == StrategyType.MAX_DRAWDOWN_SUPER_TREND_SPREAD):
             return strategy_class(
                 endpoint=self.endpoint,
                 long_spread=thresholds['long']['bet_threshold'],

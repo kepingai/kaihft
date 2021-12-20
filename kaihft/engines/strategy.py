@@ -14,6 +14,7 @@ class StrategyType(Enum):
     SUPER_TREND_SQUEEZE = "SUPER_TREND_SQUEEZE"
     MAX_DRAWDOWN_SQUEEZE = "MAX_DRAWDOWN_SQUEEZE"
     MAX_DRAWDOWN_SPREAD = "MAX_DRAWDOWN_SPREAD"
+    MAX_DRAWDOWN_SUPER_TREND_SPREAD = "MAX_DRAWDOWN_SUPER_TREND_SPREAD"
 
     def __str__(self):
         """ Convert the enum object to string. 
@@ -56,6 +57,8 @@ class Strategy():
         ne.set_vml_num_threads(8)
         # initialize running metrics
         self.metrics = {}
+        self.buffer = 5 # default buffer
+        self.buffers = {}
         logging.info(f"[strategy] Strategy initialized {self.name}  ({self.strategy}), "
             f"long_spread: {self.long_spread}, long_ttp: {self.long_ttp}, "
             f"short_spread: {self.short_spread}, short_ttp: {self.short_ttp}")
@@ -195,6 +198,34 @@ class Strategy():
                 count=1,
                 average_execution_time=execution_time,
                 total_execution_time=execution_time)
+    
+    def is_valid_buffer(self, symbol: str) -> bool:
+        """ Will check if the current time is above the buffer seconds
+            if so add timedelta to it and return that its valid. If not,
+            create a new buffer time.
+
+            Parameters
+            ----------
+            symbol: `str`
+                The pair symbol of the model.
+            
+            Returns
+            -------
+            `bool`
+                Will return `True` if symbol
+                above the buffer seconds from prev
+                inference time.
+        """
+        if symbol in self.buffers: 
+            # check if the time surpasses the buffer time
+            if datetime.utcnow() >= self.buffers[symbol]:
+                self.buffers[symbol] += timedelta(seconds=self.buffer)
+                return True
+        else: 
+            # initialize the time buffer 
+            self.buffers[symbol] = datetime.utcnow() + timedelta(seconds=self.buffer)
+            return True
+        return False
 
 class SuperTrendSqueeze(Strategy):
     """ SuperTrend Squeeze strategy implementation
@@ -426,34 +457,6 @@ class MaxDrawdownSpread(Strategy):
         self.buffer = buffer
         self.buffers = {}
 
-    def is_valid_buffer(self, symbol: str) -> bool:
-        """ Will check if the current time is above the buffer seconds
-            if so add timedelta to it and return that its valid. If not,
-            create a new buffer time.
-
-            Parameters
-            ----------
-            symbol: `str`
-                The pair symbol of the model.
-            
-            Returns
-            -------
-            `bool`
-                Will return `True` if symbol
-                above the buffer seconds from prev
-                inference time.
-        """
-        if symbol in self.buffers: 
-            # check if the time surpasses the buffer time
-            if datetime.utcnow() >= self.buffers[symbol]:
-                self.buffers[symbol] += timedelta(seconds=self.buffer)
-                return True
-        else: 
-            # initialize the time buffer 
-            self.buffers[symbol] = datetime.utcnow() + timedelta(seconds=self.buffer)
-            return True
-        return False
-
     def scout(self, 
               base: str, 
               quote: str,
@@ -524,6 +527,174 @@ class MaxDrawdownSpread(Strategy):
                 ttp = self.long_ttp
             elif (_direction == 0 and pair in self.pairs['short']
                 and last_price < open_price): 
+                ttp = self.short_ttp
+            else: return None
+            signal = True
+            # record the ending time of analysis
+            self.save_metrics(start, f"{base}/{quote}")
+            # return the appropriate result
+        return Signal(
+            base=base,
+            quote=quote,
+            take_profit=ttp,
+            spread=_spread,
+            purchase_price=float(last_price),
+            last_price=float(last_price),
+            direction=_direction,
+            callback=callback,
+            n_tick_forward=_n_tick) if signal else None
+
+class MaxDrawdownSuperTrendSpread(Strategy):
+    """ Maxdrawdown SuperTrend Spread strategy implementation
+        will scout for potential actionable
+        intelligence based on specific market behavior.
+    """
+    def __init__(self,
+                 endpoint: str,
+                 long_spread: float,
+                 long_ttp: float,
+                 long_max_drawdown: float,
+                 short_spread: float,
+                 short_ttp: float,
+                 short_max_drawdown: float,
+                 pairs: dict,
+                 log_every: int,
+                 buffer: int):
+        """ Initialize MaxDrawdownSuperTrendSpread class with specified 
+            minimum spread, take profit percentage thresholds and max 
+            drawdowns.
+
+            Parameters
+            ----------
+            endpoint: `str`
+                The endpoint to request to layer 2.
+            long_spread: `float`
+                The longing spread required from layer 2 prediction.
+            long_ttp: `float`
+                The long signal take profit percentage to take from the signal.
+            long_max_drawdown: `float`
+                The maximum allowable drawdown on a given long signal.
+            short_spread: `float`
+                The shorting spread required from layer 2 prediction.
+            short_ttp: `float`
+                The short signal take profit percentage to take from the signal.
+            short_max_drawdown: `float`
+                The maximum allowable drawdown on a given short signal.
+            pairs: `dict`
+                A dictionary of `long` and `short` pairs allowed to scout.
+            log_every: `int`
+                Log the metrics from layer 2 every n-iteration.
+            buffer: `int`
+                The buffer time before next inference of a symbol.
+        """
+        super(MaxDrawdownSuperTrendSpread, self).__init__(
+            name=str(StrategyType.MAX_DRAWDOWN_SUPER_TREND_SPREAD),
+            strategy=StrategyType.MAX_DRAWDOWN_SUPER_TREND_SPREAD,
+            description="Maximum Drawdown x SuperTrend x Spread Long vs. Short strategy.",
+            endpoint=endpoint,
+            long_spread=long_spread,
+            long_ttp=long_ttp,
+            short_spread=short_spread,
+            short_ttp=short_ttp,
+            pairs=pairs,
+            log_every=log_every
+        )
+        # in this class we will be using maximum drawdowns
+        # as the main algorithmic approach from layer 2 predictions
+        # also using lazy bear momentum squeeze as trigger.
+        self.long_max_drawdown = long_max_drawdown
+        self.short_max_drawdown = short_max_drawdown
+        # initialize technical analysis for supertrend
+        self.supertrend_mul, self.supertrend_len = 0.6, 24
+        self._technical_analysis = [
+            dict(kind="supertrend",
+                length=self.supertrend_len,
+                multiplier=self.supertrend_mul)
+        ]
+        self.technical_analysis = ta.Strategy(name=self.name,
+            description=self.description, ta=self._technical_analysis)
+        # the buffer second before next inference
+        self.buffer = buffer
+        self.buffers = {}
+
+    def scout(self, 
+              base: str, 
+              quote: str,
+              dataframe: pd.DataFrame, 
+              callback: callable) -> Union[Signal, None]:
+        """ Will scout for potential market trigger from ticker spread, 
+            if triggered run spread and direction forecast from Layer 2. 
+            Once prediction series generated from layer 2 conduct max
+            drawdown algorithm to determine the signal's max percentage spread
+            and direction and match with supertrend.
+
+            Note
+            ----
+            *Signal will be created if spread is above
+             ttp threshold and prediction from layer 2 
+             matches the max drawdown algorithm and supertrend.*
+
+            Parameters
+            ----------
+            symbol: `str`
+                The ticker symbol.
+            base: `str`
+                The base pair.
+            quote: `str`
+                The quote pair.
+            dataframe: `pd.DataFrame`
+                The klines to run technical analysis on.
+            callback: `callable`
+                The closing signal callback.
+            
+            Returns
+            -------
+            `Union[Signal, None]`
+                Will return a Signal object or None.
+        """
+        start = time.time()
+        signal = False
+        clean_df = dataframe.copy()
+        # format the clean df before inference
+        clean_df.rename(columns=dict(
+            timeframe="interval", symbol="ticker",
+            taker_buy_base_vol="taker_buy_asset_vol"), inplace=True)
+        clean_df = clean_df[['open', 'high', 'low', 'close', 'volume', 'close_time',
+            'quote_asset_volume', 'number_of_trades', 'taker_buy_asset_vol',
+            'taker_buy_quote_vol', 'datetime', 'ticker', 'interval']]
+        ta_dataframe = dataframe.copy()
+        # retrieve the technical indicators
+        ta_dataframe.ta.strategy(self.technical_analysis)
+        # run technical analysis for long and short strategy
+        # retrieve the necessary indicators
+        supertrend = f"SUPERTd_{self.supertrend_len}_{self.supertrend_mul}"
+        direction = ta_dataframe.iloc[-1][supertrend]
+        high_price = clean_df.iloc[-1].high
+        low_price = clean_df.iloc[-1].low
+        open_price = clean_df.iloc[-1].open
+        last_price = clean_df.iloc[-1].close
+        # get the current tick spread
+        tick_spread = abs((high_price - low_price) / low_price) * 100
+        minimum_spread = min(self.long_ttp, self.short_ttp)
+        pair = f"{base}{quote}".upper()
+        ttp = 0
+        # ensure that the current tick spread is above the minimum
+        # spread of either long or short strategy and ensure
+        # that the symbol has a valid buffer time before the next inference time.
+        if tick_spread >= minimum_spread and self.is_valid_buffer(pair):
+            # inference to layer 2
+            _spread, _direction, _n_tick, base, quote = self.layer2(
+                base=base, quote=quote, data=clean_df.to_dict('list'))
+            # if max drawdown algorithm did not pass
+            if _spread is None or _direction is None: return None
+            # ensure that direction and spread prediction
+            # is above specified spread for layer 1
+            # and pred direction matches supertrend direction
+            if (_direction == 1 and pair in self.pairs['long'] 
+                and last_price > open_price and direction == 1):
+                ttp = self.long_ttp
+            elif (_direction == 0 and pair in self.pairs['short']
+                and last_price < open_price and direction == -1): 
                 ttp = self.short_ttp
             else: return None
             signal = True
@@ -685,7 +856,8 @@ class MaxDrawdownSqueeze(Strategy):
 __REGISTRY = {
     str(StrategyType.SUPER_TREND_SQUEEZE): SuperTrendSqueeze,
     str(StrategyType.MAX_DRAWDOWN_SQUEEZE): MaxDrawdownSqueeze,
-    str(StrategyType.MAX_DRAWDOWN_SPREAD): MaxDrawdownSpread
+    str(StrategyType.MAX_DRAWDOWN_SPREAD): MaxDrawdownSpread,
+    str(StrategyType.MAX_DRAWDOWN_SUPER_TREND_SPREAD): MaxDrawdownSuperTrendSpread
 }
 
 def get_strategy(strategy: StrategyType) -> Union[Strategy, None]:
