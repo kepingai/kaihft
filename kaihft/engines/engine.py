@@ -522,8 +522,8 @@ class SignalEngine():
         """
         rollback = self.buffers['rollback_volatility']
         # retrieve the OHLC
-        low = np.min(dataframe.iloc[rollback:].low)
-        high = np.max(dataframe.iloc[rollback:].high)
+        low = np.min(dataframe.iloc[-rollback:].low)
+        high = np.max(dataframe.iloc[-rollback:].high)
         # check if the current kline spread
         # is not above maximium volatility
         return abs(high - low) / low < self.buffers['max_volatility']
