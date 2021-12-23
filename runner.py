@@ -86,7 +86,7 @@ def klines_binance_futures(klines, production, exp0a, exp1a):
 @click.option('--exp0a', is_flag=True, help='Publish & subscribe messages to exp0a topic.')
 @click.option('--exp1a', is_flag=True, help='Publish & subscribe messages to exp1a topic.')
 @notify_failure
-def signal_binance_spot(strategy, version, log_every, log_metrics_every, 
+def signal_binance_futures(strategy, version, log_every, log_metrics_every, 
     production, exp0a, exp1a):
     services.signal_engine.main(
         exchange='binance',
