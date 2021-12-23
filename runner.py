@@ -38,6 +38,18 @@ def ticker_binance_spot(production, exp0a, exp1a):
         exp1a=exp1a)
 
 @cli.command()
+@click.option('--production', is_flag=True, help='publish messages to production topic.')
+@click.option('--exp0a', is_flag=True, help='publish & subscribe messages to exp0a topic.')
+@click.option('--exp1a', is_flag=True, help='publish & subscribe messages to exp1a topic.')
+@notify_failure
+def ticker_binance_futures(production, exp0a, exp1a):
+    services.ticker_binance_futures.main(
+        markets=__MARKETS,
+        production=production,
+        exp0a=exp0a,
+        exp1a=exp1a)
+
+@cli.command()
 @click.option('--klines', default=250, help='the length of historical klines back.')
 @click.option('--production', is_flag=True, help='publish messages to production topic.')
 @click.option('--exp0a', is_flag=True, help='publish & subscribe messages to exp0a topic.')
@@ -45,6 +57,20 @@ def ticker_binance_spot(production, exp0a, exp1a):
 @notify_failure
 def klines_binance_spot(klines, production, exp0a, exp1a):
     services.klines_binance_spot.main(
+        n_klines=klines,
+        markets=__MARKETS,
+        production=production,
+        exp0a=exp0a,
+        exp1a=exp1a)
+
+@cli.command()
+@click.option('--klines', default=250, help='the length of historical klines back.')
+@click.option('--production', is_flag=True, help='publish messages to production topic.')
+@click.option('--exp0a', is_flag=True, help='publish & subscribe messages to exp0a topic.')
+@click.option('--exp1a', is_flag=True, help='publish & subscribe messages to exp1a topic.')
+@notify_failure
+def klines_binance_futures(klines, production, exp0a, exp1a):
+    services.klines_binance_futures.main(
         n_klines=klines,
         markets=__MARKETS,
         production=production,
