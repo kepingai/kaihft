@@ -692,12 +692,10 @@ class MaxDrawdownSuperTrendSpread(Strategy):
             # is above specified spread for layer 1
             # and pred direction matches supertrend direction
             if (_direction == 1 and pair in self.pairs['long'] 
-                and last_price > open_price and direction == 1
-                and prev_direction == 1):
+                and direction == 1 and prev_direction == 1):
                 ttp = self.long_ttp
             elif (_direction == 0 and pair in self.pairs['short']
-                and last_price < open_price and direction == -1
-                and prev_direction == -1): 
+                and direction == -1 and prev_direction == -1): 
                 ttp = self.short_ttp
             else: return None
             signal = True
