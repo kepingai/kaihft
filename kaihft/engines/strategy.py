@@ -388,6 +388,7 @@ class SuperTrendSqueeze(Strategy):
             quote=quote,
             take_profit=ttp,
             spread=_spread,
+            buffer=_n_tick,
             purchase_price=float(last_price),
             last_price=float(last_price),
             direction=_direction,
