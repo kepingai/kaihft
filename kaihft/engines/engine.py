@@ -330,6 +330,8 @@ class SignalEngine():
         for key in keys:
             if key not in buffers:
                 logging.error(f"Buffers missing key: {key}, instead got: {buffers.keys()}")
+            if not isinstance(buffers[key], float) or not isinstance(buffers[key], int):
+                logging.error(f"Buffers incorrect data type key: {key}, value: {buffers[key]}")
                 return
         # update the strategy with the new buffer
         logging.info(f"[listen] retrieving-buffer from signal database.")
@@ -552,9 +554,9 @@ class SignalEngine():
         elif self.cooldowns[symbol]['counter'] < self.buffers['cooldown_counter']: 
             return True
         elif (self.cooldowns[symbol]['counter'] == self.buffers['cooldown_counter']
-            and datetime.utcnow() >= self.cooldowns[symbol].cooldown):
+            and datetime.utcnow() >= self.cooldowns[symbol]['cooldown']):
             # revert back the counter and cooldown
-            self.cooldowns[symbol].counter = 0
+            self.cooldowns[symbol]['counter'] = 0
             return True
         return False
 
@@ -593,8 +595,8 @@ class SignalEngine():
         """
         if symbol not in self.cooldowns:
             self.cooldowns[symbol] = dict(counter=0, cooldown=datetime.utcnow())
-        self.cooldowns[symbol].counter += 1
-        self.cooldowns[symbol].cooldown += timedelta(seconds=self.buffer['cooldown'])
+        self.cooldowns[symbol]['counter'] += 1
+        self.cooldowns[symbol]['cooldown'] += timedelta(seconds=self.buffer['cooldown'])
 
     def set_enging_state(self):
         """ Will update database with the current engine state. """
@@ -759,10 +761,16 @@ class SignalEngine():
         """
         keys = ["inference", "max_volatility", "rollback_volatility", "cooldown_counter", "cooldown"]
         logging.info(f"[get] retrieving-buffer from signal database.")
+        default = dict(inference=360, max_volatility=0.1, 
+            rollback_volatility=5, cooldown_counter=2, cooldown=21600)
         buffers = self.database.get(self.buffers_ref)
         for key in keys:
             if key not in buffers:
                 raise ValueError(f"[buffers] missing buffer key: {key}, instead got: {buffers.keys()}")
+            if not isinstance(buffers[key], float) or not isinstance(buffers[key], int):
+                logging.warn(f"[buffer] non numeric buffer key: {key}, value: {buffers[key]} "
+                    f"will use default buffers instead: {default}")
+                return default
         logging.info(f"[get] retrieved buffers: {buffers} from database.")
         return buffers
 
