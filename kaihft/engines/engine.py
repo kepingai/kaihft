@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import logging, json, asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Union
 from google.cloud import pubsub_v1
 from kaihft.databases import KaiRealtimeDatabase
@@ -9,7 +9,7 @@ from kaihft.publishers.client import KaiPublisherClient
 from kaihft.subscribers.client import KaiSubscriberClient
 from kaihft.alerts.exceptions import RestartPodException
 from .strategy import StrategyType, get_strategy, Strategy
-from .signal import init_signal_from_rtd, Signal
+from .signal import SignalStatus, init_signal_from_rtd, Signal
 
 class SignalEngine():
     """ The layer-1 system of KepingAI Signal LSTF. All communication between
@@ -111,6 +111,7 @@ class SignalEngine():
         self.buffers = self._get_buffers()
         self.thresholds = self._get_thresholds()
         self.pairs = self._get_pairs()
+        self.cooldowns = {}
         self.listener_thresholds = None
         self.listener_pairs = None
         self.listener_max_drawdowns = None
@@ -216,11 +217,10 @@ class SignalEngine():
             callback: `callable`
                 A function to callback to listen for events.
         """
-        if 'MAX_DRAWDOWN' in str(self.strategy_type).upper():
-            self.listener_max_drawdowns = self.database.listen(
-                reference=self.buffers_ref,
-                callback=callback
-            )
+        self.listener_max_drawdowns = self.database.listen(
+            reference=self.buffers_ref,
+            callback=callback
+        )
     
     def _update_thresholds(self, event):
         """ The callback to update new thresholds to strategy. 
@@ -324,12 +324,13 @@ class SignalEngine():
             logging.error("Buffers not updated! Only update it via "
                 f"supervisor's notebook pairs injection!")
             return
+        keys = ["inference", "max_volatility", "rollback_volatility", "cooldown_counter", "cooldown"]
         buffers = event.data
         # ensure that inference buffer is in the dictionary
-        if ('inference' not in buffers or 'max_volatility' not in buffers or
-            'rollback_volatility' not in buffers):
-            logging.error(f"Buffers missing keys: {buffers.keys()}")
-            return
+        for key in keys:
+            if key not in buffers:
+                logging.error(f"Buffers missing key: {key}, instead got: {buffers.keys()}")
+                return
         # update the strategy with the new buffer
         logging.info(f"[listen] retrieving-buffer from signal database.")
         # update the current buffers class attribute and
@@ -478,7 +479,9 @@ class SignalEngine():
             # this will help layer2's ability for 
             # predicting stationaire market prices
             symbol = f"{base}{quote}".upper()
-            if self.is_valid_volatility(dataframe) and symbol not in self.signals: 
+            if (self.is_valid_volatility(dataframe) 
+                and self.is_valid_cooldown(symbol)
+                and symbol not in self.signals): 
                 # run technical analysis & inference to layer 2,
                 # await for futures before the remaining tasks.
                 signal = self.strategy.scout(
@@ -527,6 +530,33 @@ class SignalEngine():
         # check if the current kline spread
         # is not above maximium volatility
         return abs(high - low) / low < self.buffers['max_volatility']
+    
+    def is_valid_cooldown(self, symbol: str) -> bool:
+        """ Will check if cooldown time have passed if a pair
+            have completed up to maximum cooldown counter.
+
+            Parameters
+            ----------
+            symbol: `str`
+                The symbol of coin.
+            
+            Returns
+            -------
+            `bool`
+                Return `False` if counter reached cooldown counter
+                but current time have not surpass the cooldown time.
+        """
+        if symbol not in self.cooldowns:
+            self.cooldowns[symbol] = dict(counter=0, cooldown=datetime.utcnow())
+            return True
+        elif self.cooldowns[symbol]['counter'] < self.buffers['cooldown_counter']: 
+            return True
+        elif (self.cooldowns[symbol]['counter'] == self.buffers['cooldown_counter']
+            and datetime.utcnow() >= self.cooldowns[symbol].cooldown):
+            # revert back the counter and cooldown
+            self.cooldowns[symbol].counter = 0
+            return True
+        return False
 
     def close_signal(self, signal: Signal):
         """ A callback function that will 
@@ -549,7 +579,23 @@ class SignalEngine():
             logging.info(f"current active signals: {self.signals.keys()}")
             # update the real-time database with newly updated dictionary
             self.set_enging_state()
+            # update cooldown if signal completed
+            if signal.status == SignalStatus.COMPLETED:
+                self.update_cooldown(signal.symbol)
     
+    def update_cooldown(self, symbol: str):
+        """ Will update the cooldown counter and time of a symbol.
+
+            Parameters
+            ----------
+            symbol: `str`
+                The symbol to update cooldown
+        """
+        if symbol not in self.cooldowns:
+            self.cooldowns[symbol] = dict(counter=0, cooldown=datetime.utcnow())
+        self.cooldowns[symbol].counter += 1
+        self.cooldowns[symbol].cooldown += timedelta(seconds=self.buffer['cooldown'])
+
     def set_enging_state(self):
         """ Will update database with the current engine state. """
         # set the current engine state to database 
@@ -682,16 +728,13 @@ class SignalEngine():
             `ValueError`
                 will raise if data structure does not match production.
         """
-        if 'MAX_DRAWDOWN' in str(self.strategy_type).upper(): 
-            logging.info(f"[get] retrieving-drawdowns from signal database.")
-            max_drawdowns = self.database.get(self.max_drawdowns_ref)
-            if 'long' not in max_drawdowns or 'short' not in max_drawdowns:
-                raise ValueError(f"Max Drawdowns required `long` and `short`, instead got: {max_drawdowns.keys()}")
-            logging.info(f"[get] retrieved-max drawdowns: {max_drawdowns} from database.")
-            return dict(long=float(max_drawdowns['long']), 
-                short=float(max_drawdowns['short']))
-        logging.info(f"[engine] not using max-drawdowns")    
-        return dict(long=0.6, short=0.6)
+        logging.info(f"[get] retrieving-drawdowns from signal database.")
+        max_drawdowns = self.database.get(self.max_drawdowns_ref)
+        if 'long' not in max_drawdowns or 'short' not in max_drawdowns:
+            raise ValueError(f"[max-drawdowns] missing`long` and `short`, instead got: {max_drawdowns.keys()}")
+        logging.info(f"[get] retrieved-max drawdowns: {max_drawdowns} from database.")
+        return dict(long=float(max_drawdowns['long']), 
+            short=float(max_drawdowns['short']))
     
     def _get_buffers(self) -> dict:
         """ Will retrieve the inference buffer time.
@@ -705,6 +748,8 @@ class SignalEngine():
             ...     "inference": 360,           # the buffer time in sec to inference layer 2
             ...     "max_volatility": 0.1,      # the % max spread of rollback periods
             ...     "rollback_volatility": 5    # rollingback klines to check spread
+            ...     "cooldown_counter": 2       # maximum completion before cooldown counter restart.
+            ...     "cooldown": 21600           # cooldown time in sec before another signal.
             ... }
 
             Raises
@@ -712,16 +757,14 @@ class SignalEngine():
             `ValueError`
                 will raise if data structure does not match production.
         """
-        if 'MAX_DRAWDOWN' in str(self.strategy_type).upper():
-            logging.info(f"[get] retrieving-buffer from signal database.")
-            buffers = self.database.get(self.buffers_ref)
-            if ('inference' not in buffers or 'max_volatility' not in buffers 
-                or 'rollback_volatility' not in buffers):
-                raise ValueError(f"MaxDrawdownSpread missing buffers: {buffers.keys()}")
-            logging.info(f"[get] retrieved buffers: {buffers} from database.")
-            return buffers
-        logging.info(f"[max drawdown] not using max drawdown.")
-        return dict(inference=60, max_volatility=0.05, rollback_volatility=10)
+        keys = ["inference", "max_volatility", "rollback_volatility", "cooldown_counter", "cooldown"]
+        logging.info(f"[get] retrieving-buffer from signal database.")
+        buffers = self.database.get(self.buffers_ref)
+        for key in keys:
+            if key not in buffers:
+                raise ValueError(f"[buffers] missing buffer key: {key}, instead got: {buffers.keys()}")
+        logging.info(f"[get] retrieved buffers: {buffers} from database.")
+        return buffers
 
     def _get_thresholds(self) -> dict:
         """ Will retrieve the thresholds for layer1.
