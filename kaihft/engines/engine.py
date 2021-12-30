@@ -553,11 +553,13 @@ class SignalEngine():
             return True
         elif self.cooldowns[symbol]['counter'] < self.buffers['cooldown_counter']: 
             return True
-        elif (self.cooldowns[symbol]['counter'] == self.buffers['cooldown_counter']
-            and datetime.utcnow() >= self.cooldowns[symbol]['cooldown']):
-            # revert back the counter and cooldown
-            self.cooldowns[symbol]['counter'] = 0
-            return True
+        elif self.cooldowns[symbol]['counter'] == self.buffers['cooldown_counter']:
+            if datetime.utcnow() >= self.cooldowns[symbol]['cooldown']:
+                # revert back the counter and cooldown
+                self.cooldowns[symbol]['counter'] = 0
+                return True
+            logging.info(f"[cooldown] symbol: {symbol} cooldown reached! " 
+                f"next cooldown reset: {self.cooldowns[symbol]}")
         return False
 
     def close_signal(self, signal: Signal):
