@@ -330,7 +330,7 @@ class SignalEngine():
         for key in keys:
             if key not in buffers:
                 logging.error(f"Buffers missing key: {key}, instead got: {buffers.keys()}")
-            if not isinstance(buffers[key], float) or not isinstance(buffers[key], int):
+            if not isinstance(buffers[key], float) and not isinstance(buffers[key], int):
                 logging.error(f"Buffers incorrect data type key: {key}, value: {buffers[key]}")
                 return
         # update the strategy with the new buffer
@@ -596,7 +596,7 @@ class SignalEngine():
         if symbol not in self.cooldowns:
             self.cooldowns[symbol] = dict(counter=0, cooldown=datetime.utcnow())
         self.cooldowns[symbol]['counter'] += 1
-        self.cooldowns[symbol]['cooldown'] += timedelta(seconds=self.buffer['cooldown'])
+        self.cooldowns[symbol]['cooldown'] += timedelta(seconds=self.buffers['cooldown'])
 
     def set_enging_state(self):
         """ Will update database with the current engine state. """
@@ -767,7 +767,7 @@ class SignalEngine():
         for key in keys:
             if key not in buffers:
                 raise ValueError(f"[buffers] missing buffer key: {key}, instead got: {buffers.keys()}")
-            if not isinstance(buffers[key], float) or not isinstance(buffers[key], int):
+            if not isinstance(buffers[key], float) and not isinstance(buffers[key], int):
                 logging.warn(f"[buffer] non numeric buffer key: {key}, value: {buffers[key]} "
                     f"will use default buffers instead: {default}")
                 return default
