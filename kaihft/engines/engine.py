@@ -762,7 +762,7 @@ class SignalEngine():
         keys = ["inference", "max_volatility", "rollback_volatility", "cooldown_counter", "cooldown"]
         logging.info(f"[get] retrieving-buffer from signal database.")
         default = dict(inference=360, max_volatility=0.1, 
-            rollback_volatility=5, cooldown_counter=2, cooldown=21600)
+            rollback_volatility=5, cooldown_counter=10, cooldown=21600)
         buffers = self.database.get(self.buffers_ref)
         for key in keys:
             if key not in buffers:
