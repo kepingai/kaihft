@@ -40,6 +40,17 @@ def klines_binance_spot(klines, production):
         production=production)
 
 @cli.command()
+@click.option('--klines', default=250, help='the length of historical klines back.')
+@click.option('--production', is_flag=True, help='publish messages to production topic.')
+@click.option('--timeframe', default=15, help='market timeframe to stream')
+# @notify_failure
+def klines_binance_usdm(klines, production, timeframe):
+    services.klines_binance_usdm.main(
+        n_klines=klines,
+        production=production,
+        timeframe=timeframe)
+
+@cli.command()
 @click.option('--strategy', default="STS", help="available strategies: 'STS'")
 @click.option('--version', default='v0', help="the version of signal engine.")
 @click.option('--log-every', default=1000, help="log cloud pub/sub messages every.")
@@ -54,6 +65,7 @@ def signal_binance_spot(strategy, version, log_every, log_metrics_every, product
         version=version,
         log_every=log_every,
         log_metrics_every=log_metrics_every)
+
 
 if __name__ == "__main__":
     cli()

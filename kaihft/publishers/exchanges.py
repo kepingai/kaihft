@@ -17,7 +17,7 @@ class KlineStatus(Enum):
         return str(self.value)
 
 class BaseTickerKlinesPublisher():
-    def __init__(self, 
+    def __init__(self,
                  name: str,
                  websocket: any,
                  stream_id: any,
@@ -35,7 +35,7 @@ class BaseTickerKlinesPublisher():
         self.quotes = quotes
         logging.info(f"ticker publisher initialized {self.name}, {self.websocket}, "
             f"from: {self.stream_id}, to: {self.topic_path}, will log update every: {self.log_every} messages.")
-    
+
     def format_binance_ticker_to_dict(self, data) -> dict:
         """ Will format binance ticker websocket data to dictionary. 
             Parameters
@@ -92,7 +92,7 @@ class BaseTickerKlinesPublisher():
             taker_buy_base_vol=float(data["V"]) if data.get("V") else None,
             taker_buy_quote_vol=float(data["Q"]) if data.get("Q") else None,
         ), bool(data['x'])
-    
+
     def get_base_quote(self, symbol: str) -> Tuple[str, str]:
         """ Will return the allowed base and quote from
             current signal enginge.
@@ -115,8 +115,230 @@ class BaseTickerKlinesPublisher():
         raise ValueError(f"base/quote from symbol: {symbol}"
             f"is not applicable to signal engine!")
 
+
+class BinanceUSDMKlinesPublisher(BaseTickerKlinesPublisher):
+    __FLOATINGS = [
+        "open", "high", "close", "low",
+        "volume", "quote_asset_volume",
+        "taker_buy_base_vol", "taker_buy_quote_vol"]
+    __COLUMNS = [
+        "timestamp", "open", "high", "low", "close",
+        "volume", "close_time", "quote_asset_volume", "number_of_trades",
+        "taker_buy_base_vol", "taker_buy_quote_vol", "ignore"]
+    __DROP = ["timestamp", "ignore"]
+
+    def __init__(self,
+                 client: Client,
+                 websocket: BinanceWebSocketApiManager,
+                 stream_id: str,
+                 publisher: KaiPublisherClient,
+                 quotes: list = ['USDT'],
+                 topic_path: str = 'klines-binance-v0',
+                 n_klines: int = 250,
+                 timeframe: int = 1,
+                 ):
+        """ This class streams klines data from Binance websocket API
+            for BinanceUSDM
+
+            Parameters
+            ----------
+            client: `binance.Client`
+                we will get the historical klines from this object
+            websocket: `BinanceWebSocketApiManager`
+                The websocket to retrieve data.
+            stream_id: `str`
+                the stream id
+            publisher: `KaiPublisherClient`
+                publisher client to publish data
+            topic_path: `str`
+                the topic to publish the data to
+            n_klines: `int`
+                the number of candles to publish
+            timeframe: `int`
+                market timeframe in minutes. If using 1h, please input 60, etc
+        """
+        super(BinanceUSDMKlinesPublisher, self).__init__(
+            name='BINANCEUSDM', websocket=websocket, stream_id=stream_id,
+            publisher=publisher, topic_path=topic_path, quotes=quotes)
+        self.client = client
+        assert n_klines <= 1000
+        self.n_klines = n_klines
+        self.timeframe = timeframe
+        self._kline_intervals = {1: self.client.KLINE_INTERVAL_1MINUTE,
+                                 3: self.client.KLINE_INTERVAL_3MINUTE,
+                                 5: self.client.KLINE_INTERVAL_15MINUTE,
+                                 15: self.client.KLINE_INTERVAL_15MINUTE,
+                                 30: self.client.KLINE_INTERVAL_30MINUTE,
+                                 60: self.client.KLINE_INTERVAL_1HOUR,
+                                 120: self.client.KLINE_INTERVAL_2HOUR,
+                                 240: self.client.KLINE_INTERVAL_4HOUR}
+        assert self.timeframe in self._kline_intervals.keys()
+        self.sleep = 0.05
+        self.markets_klines, self.kline_status = self.initialize_klines()
+
+    def initialize_klines(self):
+        markets_klines = {}
+        kline_status = {}
+        interval = self._kline_intervals[self.timeframe]
+        # get all possible tickers from the client
+        all_markets = [market['symbol'] for market in self.client.get_all_tickers()]
+
+        for market in all_markets:
+            start = time.time()
+            try:
+                # retrieve the last historical n-klines
+                klines = self.client.futures_klines(symbol='BTCUSDT',
+                                                    interval=interval,
+                                                    limit=self.n_klines)
+            except BinanceAPIException as e:
+                if e.status_code == 400: continue
+                else: logging.error(f"Exception caught retrieving historical klines: {e}")
+
+            if klines is None or len(klines) == 0: continue
+            symbol = market.upper()
+            markets_klines[symbol] = self.to_dataframe(
+                symbol=symbol, interval=str(interval), klines=klines)
+            # check if the market kline have closed
+            kline_status[symbol] = (KlineStatus.CLOSED if
+                                    datetime.utcnow().minute % self.timeframe == 0 else KlineStatus.OPEN)
+            # if all successful calculate the
+            # the overall execution time and delay if needed
+            logging.info(f"initialized klines: {market}-{interval} - duration: {time.time() - start} seconds")
+            self.delay(start)
+        logging.info(f"successful kline initializations: with interval={interval}")
+        return markets_klines, kline_status
+
+    def to_dataframe(self, symbol: str, interval: str, klines: list) -> pd.DataFrame:
+        """Will convert klines from binance to dataframe.
+
+            Parameters
+            ----------
+            symbol: `str`
+                The symbol of instrument.
+            interval: `str`
+                The interval of the symbol.
+            klines: `list`
+                A list of list containing binance formatted klines.
+
+            Returns
+            -------
+            `pd.DataFrame`
+                The dataframe formatted klines.
+        """
+        dataframe = pd.DataFrame(klines, columns=self.__COLUMNS)
+        dataframe['symbol'] = symbol.upper()
+        dataframe['timeframe'] = interval
+        dataframe[self.__FLOATINGS] = dataframe[self.__FLOATINGS].astype('float32')
+        dataframe.drop(columns=self.__DROP, inplace=True)
+        return dataframe
+
+    def run(self):
+        """ Load,format data from websocket manager & publish
+            it to the topic specified during initialization.
+        """
+        count = 0
+        while True:
+            # binance spot will only allow 24h max stream
+            # connection, this will automatically close the script
+            if self.websocket.is_manager_stopping(): exit(0)
+            # get and remove the oldest entry from the `stream_buffer` stack
+            oldest_stream_data_from_stream_buffer = self.websocket.pop_stream_data_from_stream_buffer()
+            # print the stream data from stream buffer
+            if oldest_stream_data_from_stream_buffer is False: time.sleep(0.01)
+            else:
+                stream = json.loads(oldest_stream_data_from_stream_buffer)
+                if 'data' not in stream: continue
+
+                for single_stream_data in stream['data']:
+                    data, closed = self.format_binance_kline_to_dict(single_stream_data)
+                    symbol = data['symbol'].upper()
+                    # if kline is closed change the kline status
+                    self.kline_status[symbol] = (KlineStatus.CLOSED
+                        if closed else KlineStatus.OPEN)
+                    # update the dataframe appropriately
+                    klines = self.update_klines(symbol, data)
+                    base, quote = self.get_base_quote(symbol)
+                    # publish klines
+                    self.publisher.publish(
+                        origin=self.__class__.__name__,
+                        topic_path=self.topic_path,
+                        data=klines,
+                        attributes=dict(
+                            base=base,
+                            quote=quote,
+                            symbol=symbol))
+            count += 1
+            if count % self.log_every == 0:
+                logging.info(self.websocket.print_summary(disable_print=True))
+                count = 0
+
+    def update_klines(self, symbol: str, data: dict) -> dict:
+        """ Update symbol klines with the new data
+
+            Parameters
+            ----------
+            symbol: `str`
+                The symbol of the market.
+            data: `dict`
+                Dictionary formatted data.
+
+            Returns
+            -------
+            `dict`
+                Dataframe of klines represented
+                into a dictionary format.
+
+            Example
+            -------
+            .. code-block:: python
+            {
+                'open': [25.989999771118164, 25.920000076293945, 25.920000076293945],
+                'high': [26.020000457763672, 26.0, 25.96999931335449],
+                'low': [25.79999923706055, 25.84000015258789, 25.739999771118164],
+                'close': [25.93000030517578, 25.920000076293945, 25.76000022888184],
+                'volume': [20038.5703125, 22381.650390625, 12299.23046875],
+                'quote_asset_volume': [518945.0625, 580255.5, 317816.84375],
+                'number_of_trades': [733, 759, 619],
+                'taker_buy_base_vol': [9005.06, 12899.83, 3608.93],
+                'taker_buy_quote_vol': [233168.995, 334395.2921, 93283.808],
+                'close_time': [1630031399999, 1630032299999, 1630033199999],
+                'symbol': ['UNIUSDT', 'UNIUSDT', 'UNIUSDT'],
+                'timeframe': ['15m', '15m', '15m']
+            }
+        """
+        # TODO: FIX THIS KLINE UPDATE MECHANISM
+        # retrieve the specific klines
+        # of the specific symbol and status
+        status = self.kline_status[symbol]
+        if status == KlineStatus.CLOSED:
+            # append the klines dataframe with new kline
+            # remove the first row of the kline for memory
+            self.markets_klines[symbol] = self.markets_klines[symbol].append(data, ignore_index=True)
+            self.markets_klines[symbol] = self.markets_klines[symbol].iloc[1:]
+            self.kline_status[symbol] = KlineStatus.OPEN
+        else:
+            # kline is still open so update the last row
+            self.markets_klines[symbol].at[self.markets_klines[symbol].index[-1],
+                                           list(data.keys())] = list(data.values())
+        # return the klines into dictionary format
+        return self.markets_klines[symbol].to_dict('list')
+
+    def delay(self, start: time):
+        """ Get the difference between now and
+            starting time. If time is below
+            expected buffer delay the thread.
+
+            Parameters
+            ----------
+            start: `time`
+                The starting time.
+        """
+        end = time.time() - start
+        if end <= self.sleep: time.sleep(abs(self.sleep - end))
+
+
 class BinanceTickerPublisher(BaseTickerKlinesPublisher):
-    def __init__(self, 
+    def __init__(self,
             websocket: BinanceWebSocketApiManager,
             stream_id: str,
             publisher: KaiPublisherClient,
@@ -138,9 +360,9 @@ class BinanceTickerPublisher(BaseTickerKlinesPublisher):
                 The topic path to publish data.
         """
         super(BinanceTickerPublisher, self).__init__(
-            name='BINANCE', websocket=websocket, stream_id=stream_id, 
+            name='BINANCE', websocket=websocket, stream_id=stream_id,
             publisher=publisher, topic_path=topic_path, quotes=quotes)
-    
+
     def run(self):
         """ Load,format data from websocket manager & publish
             it to the topic specified during initialization.
@@ -176,15 +398,15 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
     # initialize globals that will be used
     # throughout the exchanges class here.
     __FLOATINGS = [
-            "open", "high", "close", "low", 
+            "open", "high", "close", "low",
             "volume", "quote_asset_volume",
             "taker_buy_base_vol", "taker_buy_quote_vol"]
     __COLUMNS = [
-        "timestamp", "open", "high", "low", "close", 
-        "volume", "close_time","quote_asset_volume", "number_of_trades", 
-        "taker_buy_base_vol", "taker_buy_quote_vol",  "ignore"] 
+        "timestamp", "open", "high", "low", "close",
+        "volume", "close_time","quote_asset_volume", "number_of_trades",
+        "taker_buy_base_vol", "taker_buy_quote_vol",  "ignore"]
     __DROP = ["timestamp", "ignore"]
-    def __init__(self, 
+    def __init__(self,
             client: Client,
             websocket: BinanceWebSocketApiManager,
             stream_id: str,
@@ -212,7 +434,7 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
                 A list containing the symbols.
         """
         super().__init__(
-            name='BINANCE', websocket=websocket, stream_id=stream_id, 
+            name='BINANCE', websocket=websocket, stream_id=stream_id,
             publisher=publisher, topic_path=topic_path, quotes=quotes)
         assert n_klines <= 1000
         self.client = client
@@ -220,7 +442,7 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
         self.markets = markets
         self.sleep = 0.05
         self.markets_klines, self.kline_status = self.initialize_klines()
-    
+
     def initialize_klines(self):
         """Initialize all historical n-klines for the specified markets."""
         # initialize market klines, kline status and
@@ -229,7 +451,7 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
         kline_status = {}
         _interval = 15
         interval = self.client.KLINE_INTERVAL_15MINUTE
-        start_timestamp = (datetime.utcnow() - 
+        start_timestamp = (datetime.utcnow() -
             timedelta(minutes=_interval * self.n_klines)).timestamp()
         for market in self.markets:
             start = time.time()
@@ -248,8 +470,8 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
             markets_klines[symbol] = self.to_dataframe(
                 symbol=symbol, interval=str(interval), klines=klines)
             # check if the market kline have closed
-            kline_status[symbol] = (KlineStatus.CLOSED if 
-                datetime.utcnow().minute % _interval == 0 else KlineStatus.OPEN)
+            kline_status[symbol] = (KlineStatus.CLOSED if
+                                    datetime.utcnow().minute % _interval == 0 else KlineStatus.OPEN)
             # if all successful calculate the
             # the overall execution time and delay if needed
             logging.info(f"initialized klines: {market}-{interval} - duration: {time.time() - start} seconds")
@@ -280,7 +502,7 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
         dataframe[self.__FLOATINGS] = dataframe[self.__FLOATINGS].astype('float32')
         dataframe.drop(columns=self.__DROP, inplace=True)
         return dataframe
-    
+
     def delay(self, start: time):
         """ Get the difference between now and
             starting time. If time is below
@@ -313,7 +535,7 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
                 data, closed = self.format_binance_kline_to_dict(stream['data']['k'])
                 symbol = data['symbol'].upper()
                 # if kline is closed change the kline status
-                self.kline_status[symbol] = (KlineStatus.CLOSED 
+                self.kline_status[symbol] = (KlineStatus.CLOSED
                     if closed else KlineStatus.OPEN)
                 # update the dataframe appropriately
                 klines = self.update_klines(symbol, data)
@@ -321,7 +543,7 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
                 # publish klines
                 self.publisher.publish(
                     origin=self.__class__.__name__,
-                    topic_path=self.topic_path, 
+                    topic_path=self.topic_path,
                     data=klines,
                     attributes=dict(
                         base=base,
@@ -331,7 +553,7 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
             if count % self.log_every == 0:
                 logging.info(self.websocket.print_summary(disable_print=True))
                 count = 0
-    
+
     def update_klines(self, symbol: str, data: dict) -> dict:
         """ Update symbol klines with the new data
 
@@ -378,7 +600,7 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
             self.kline_status[symbol] = KlineStatus.OPEN
         else:
             # kline is still open so update the last row
-            self.markets_klines[symbol].at[self.markets_klines[symbol].index[-1], 
+            self.markets_klines[symbol].at[self.markets_klines[symbol].index[-1],
                 list(data.keys())] = list(data.values())
         # return the klines into dictionary format
         return self.markets_klines[symbol].to_dict('list')
