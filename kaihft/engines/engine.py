@@ -1,19 +1,28 @@
 import pandas as pd
+import numpy as np
 import logging, json, asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import Union
 from google.cloud import pubsub_v1
 from kaihft.databases import KaiRealtimeDatabase
 from kaihft.publishers.client import KaiPublisherClient
 from kaihft.subscribers.client import KaiSubscriberClient
-from .strategy import get_strategy, Strategy
-from .signal import init_signal_from_rtd, Signal
+from kaihft.alerts.exceptions import RestartPodException
+from .strategy import StrategyType, get_strategy, Strategy
+from .signal import SignalStatus, init_signal_from_rtd, Signal
 
 class SignalEngine():
+    """ The layer-1 system of KepingAI Signal LSTF. All communication between
+        layer 1 and layer 2 is conducted concurrently in this class.
+    """
     def __init__(
         self,
         database: KaiRealtimeDatabase,
         database_ref: str, 
         thresholds_ref: str,
+        max_drawdowns_ref: str,
+        buffers_ref: str,
+        pairs_ref: str,
         archive_topic_path: str,
         dist_topic_path: str,
         publisher: KaiPublisherClient,
@@ -22,7 +31,8 @@ class SignalEngine():
         subscriptions_params: dict,
         log_every: int,
         log_metrics_every: int,
-        strategy: str = 'STS'):
+        strategy: StrategyType = StrategyType.SUPER_TREND_SQUEEZE,
+        endpoint: str = 'predict_15m'):
         """ Will initialize the signal engine
             to scout for potential actionable intelligence
             from ticker, klines data subscriber. This signal
@@ -34,7 +44,15 @@ class SignalEngine():
             database: `KaiRealtimeDatabase`
                 real-time database containing the most-recent signals.
             database_ref: `str`
-                A string of database reference path.
+                A string of database reference path to thresholds.
+            pairs_ref: `str`
+                A string of database reference path to allowed pairs.
+            thresholds_ref: `str`
+                A string of database reference path to thresholds config.
+            max_drawdowns_ref: `str`
+                A string of database reference path to maximum drawdowns.
+            buffers_ref: `str`
+                A string of database reference path to buffers.
             archive_topic_path: `str`
                 Is the signal archiving topic path for new and closed signals.
             dist_topic_path: `str`
@@ -45,31 +63,37 @@ class SignalEngine():
                 The subscriber client for klines.
             subscriptions_params: `dict`
                 A dictionary containing the subscription id and timeout.
-            strategy: `str`
-                The strategy to run, default to STS.
+            endpoint: `str`
+                The endpoint to request to layer 2.
             log_every: `int`
                 Log ticker and klines messages every.
             log_metrics_every: `int`
                 Log layer 2 inference metrics every.
+            strategy: `str`
+                The strategy to run, default to STS.
+            endpoint: `str`
+                The end point for layer 2 connection.
 
             Example
             -------
-            subscription_params example please follow:
-            .. code-block:: python
-            {
-                "ticker": {
-                    "id": "dev-ticker-binance-spot",
-                    "timeout": None # this means to listen for data indefinitely
-                },
-                "klines": {
-                    "id": "dev-klines-binance-spot",
-                    "timeout": 10 # this means to listen for data for 10s only.
-                }
-            }
+            `subscription_params` example please follow:
+            >>> {
+            ...    "ticker": {
+            ...        "id": "dev-ticker-binance-spot",
+            ...        "timeout": None # this means to listen for data indefinitely
+            ...    },
+            ...    "klines": {
+            ...        "id": "dev-klines-binance-spot",
+            ...        "timeout": 10 # this means to listen for data for 10s only.
+            ...    }
+            ... }
         """
         self.database = database
         self.database_ref = database_ref
         self.thresholds_ref = thresholds_ref
+        self.max_drawdowns_ref = max_drawdowns_ref
+        self.buffers_ref = buffers_ref
+        self.pairs_ref = pairs_ref
         self.archive_topic_path = archive_topic_path
         self.dist_topic_path = dist_topic_path
         self.publisher = publisher
@@ -81,11 +105,23 @@ class SignalEngine():
         self.log_metrics_every = log_metrics_every
         self.ticker_counts = 1
         self.klines_counts = 1
+        # the initialization should be in this order
+        self.strategy_type = strategy
+        self.max_drawdowns = self._get_max_drawdowns()
+        self.buffers = self._get_buffers()
         self.thresholds = self._get_thresholds()
+        self.pairs = self._get_pairs()
+        self.cooldowns = {}
+        self.listener_thresholds = None
+        self.listener_pairs = None
+        self.listener_max_drawdowns = None
+        self.endpoint = endpoint
         self.strategy = self._get_strategy(strategy, self.thresholds)
     
     def run(self):
-        """ Will run signal engine concurrently """
+        """ Will run signal engine concurrently, 
+            learn more in `_run()` function in the source code.
+        """
         logging.warn(f"[start] signal engine starts - strategy: {self.strategy}")
         # retrive the most recent signal data from subscriber
         self.signals = self.get_signals()
@@ -106,7 +142,11 @@ class SignalEngine():
         """
         await asyncio.gather(
             self.subscribe(self.ticker_subscriber, 'ticker', self.update_signals),
-            self.subscribe(self.klines_subscriber, 'klines', self.scout_signals)
+            self.subscribe(self.klines_subscriber, 'klines', self.scout_signals),
+            self.listen_thresholds(self._update_thresholds),
+            self.listen_pairs(self._update_pairs),
+            self.listen_max_drawdowns(self._update_max_drawdowns),
+            self.listen_buffers(self._update_buffers)
         )
         with self.ticker_subscriber.client, self.klines_subscriber.client:
             try:
@@ -124,17 +164,208 @@ class SignalEngine():
                 self.ticker_subscriber.streaming_pull_future.result()  
                 self.klines_subscriber.streaming_pull_future.result()
                 logging.error(f"Exception caught subscription, Error: {e}")
+            finally:
+                # close all subscription to database
+                if self.listener_thresholds: self.listener_thresholds.close()
+                if self.listener_pairs: self.listener_pairs.close()
+                if self.listener_max_drawdowns: self.listener_max_drawdowns.close()
+    
+    async def listen_thresholds(self, callback: callable):
+        """ Will begin subscription to thresholds in database. 
+
+            Parameters
+            ----------
+            callback: `callable`
+                A function to callback to listen for events.
+        """
+        self.listener_thresholds = self.database.listen(
+            reference=self.thresholds_ref,
+            callback=callback)
+    
+    async def listen_pairs(self, callback: callable):
+        """ Will begin subscription to pairs in database. 
+        
+            Parameters
+            ----------
+            callback: `callable`
+                A function to callback to listen for events.
+        """
+        self.listener_pairs = self.database.listen(
+            reference=self.pairs_ref,
+            callback=callback
+        )
+    
+    async def listen_max_drawdowns(self, callback: callable):
+        """ Will begin subscription to max drawdowns in database. 
+        
+            Parameters
+            ----------
+            callback: `callable`
+                A function to callback to listen for events.
+        """
+        if self.strategy_type == StrategyType.MAX_DRAWDOWN_SQUEEZE:
+            self.listener_max_drawdowns = self.database.listen(
+                reference=self.max_drawdowns_ref,
+                callback=callback
+            )
+    
+    async def listen_buffers(self, callback: callable):
+        """ Will begin subscription to buffers in database. 
+        
+            Parameters
+            ----------
+            callback: `callable`
+                A function to callback to listen for events.
+        """
+        self.listener_max_drawdowns = self.database.listen(
+            reference=self.buffers_ref,
+            callback=callback
+        )
+    
+    def _update_thresholds(self, event):
+        """ The callback to update new thresholds to strategy. 
+
+            Parameters
+            ----------
+            event: `db.Event`
+                This event can access the data, path & event_type
+        """
+        if str(event.event_type) != 'put' or event.data is None: return
+        if str(event.path) != '/': 
+            logging.error("Thresholds not updated! Only update threshold via "
+                f"supervisor's notebook threshold injection!")
+            return
+        thresholds = event.data
+        # ensure that both long and short thresholds in the data
+        if 'long' not in thresholds or 'short' not in thresholds: 
+            logging.error(f"Thresholds required `long` and `short`, instead got: {thresholds.keys()}")
+            return
+        # ensure that bet threshold and ttp threshold in the data
+        for dir, threshold in thresholds.items():
+            if 'bet_threshold' not in threshold or 'ttp_threshold' not in threshold:
+                logging.error(f"Missing `bet_threshold` and/or `ttp_threshold` "
+                    f", instead got: {threshold}, direction: {dir}")
+                return
+        # update the strategy's with new thresholds
+        logging.info(f"[listen] retrieving-new-thresholds from signal database.")
+        self.strategy.long_spread = thresholds['long']['bet_threshold']
+        self.strategy.long_ttp = thresholds['long']['ttp_threshold']
+        self.strategy.short_spread= thresholds['short']['bet_threshold']
+        self.strategy.short_ttp = thresholds['short']['ttp_threshold']
+        logging.info(f"[listen] updated-strategy-new-thresholds: {thresholds}")
+    
+    def _update_pairs(self, event):
+        """ The callback to update new pairs to strategy. 
+
+            Parameters
+            ----------
+            event: `db.Event`
+                This event can access the data, path & event_type
+        """
+        if str(event.event_type) != 'put' or event.data is None: return
+        if str(event.path) != '/': 
+            logging.error("Pairs not updated! Only update pairs via "
+                f"supervisor's notebook pairs injection!")
+            return
+        pairs = event.data
+        # ensure that both long and short pairs in the data
+        if 'long' not in pairs or 'short' not in pairs: 
+            logging.error(f"Pairs required `long` and `short`, instead got: {pairs.keys()}")
+            return
+        # ensure that data structure matches with production
+        if not isinstance(pairs['long'], list) or not isinstance(pairs['short'], list):
+            logging.error(f"Pairs `long` and `short` must be a list, instead got: {pairs}")
+            return
+        # update the strategy's with new pairs
+        logging.info(f"[listen] retrieving-new-pairs from signal database.")
+        pairs['long'] = [pair.upper() for pair in pairs['long']]
+        pairs['short'] = [pair.upper() for pair in pairs['short']]
+        self.pairs.update(pairs)
+        # update the strategy pairs changes
+        self.strategy.pairs = pairs
+        logging.info(f"[listen] updated-pairs in strategy: {pairs}")
+
+    def _update_max_drawdowns(self, event):
+        """ The callback to update new max drawdowns to strategy. 
+
+            Parameters
+            ----------
+            event: `db.Event`
+                This event can access the data, path & event_type
+        """
+        if str(event.event_type) != 'put' or event.data is None: return
+        if str(event.path) != '/': 
+            logging.error("Max drawdowns not updated! Only update it via "
+                f"supervisor's notebook pairs injection!")
+            return
+        max_drawdowns = event.data
+        # ensure that both long and short max drawdowns are in the data
+        if 'long' not in max_drawdowns or 'short' not in max_drawdowns: 
+            logging.error(f"Max Drawdowns required `long` and `short`, instead got: {max_drawdowns.keys()}")
+            return
+        # update the strategy's with new max drawdowns
+        logging.info(f"[listen] retrieving-new-max drawdowns from signal database.")
+        self.max_drawdowns.update(max_drawdowns)
+        # update the strategy max drawdown changes
+        self.strategy.long_max_drawdown = self.max_drawdowns['long']
+        self.strategy.short_max_drawdown = self.max_drawdowns['short']
+        logging.info(f"[listen] updated-max drawdown: {self.max_drawdowns}")
+    
+    def _update_buffers(self, event):
+        """ The callback to update new buffers to strategy. 
+
+            Parameters
+            ----------
+            event: `db.Event`
+                This event can access the data, path & event_type
+        """
+        if str(event.event_type) != 'put' or event.data is None: return
+        if str(event.path) != '/': 
+            logging.error("Buffers not updated! Only update it via "
+                f"supervisor's notebook pairs injection!")
+            return
+        keys = ["inference", "max_volatility", "rollback_volatility", "cooldown_counter", "cooldown"]
+        buffers = event.data
+        # ensure that inference buffer is in the dictionary
+        for key in keys:
+            if key not in buffers:
+                logging.error(f"Buffers missing key: {key}, instead got: {buffers.keys()}")
+            if not isinstance(buffers[key], float) and not isinstance(buffers[key], int):
+                logging.error(f"Buffers incorrect data type key: {key}, value: {buffers[key]}")
+                return
+        # update the strategy with the new buffer
+        logging.info(f"[listen] retrieving-buffer from signal database.")
+        # update the current buffers class attribute and
+        # update the strategy inference buffer 
+        self.buffers.update(buffers)
+        if hasattr(self.strategy, 'buffer'):
+            self.strategy.buffer = self.buffers['inference']
+        logging.info(f"[listen] updated buffer: {self.buffers}")
     
     async def subscribe(self,
                         subscriber: KaiSubscriberClient,
                         subscription: str,
-                        callback: callable):
+                        callback: callable,
+                        single_stream: bool = False):
+        """ Will begin subscription to Cloud Pub/Sub.
+
+            Parameters
+            ----------
+            subscriber: `KaiSubscriberClient`
+                A subscription client to listen to messages.`
+            subscription: `str`
+                `ticker` or `klines` topic subscription.
+            callback: `callable`
+                The callback function to handle messages.
+            single_stream: `bool`
+                True if the whole engine is meant to subscribe in singular topic only.
+        """
         # start subscription path and futures
         subscriber.subscribe(
             subscription_id=self.subscriptions_params[subscription]['id'],
             timeout=self.subscriptions_params[subscription]['timeout'],
             callback=callback,
-            single_stream=False)
+            single_stream=single_stream)
             
     def update_signals(self, message: pubsub_v1.subscriber.message.Message):
         """ Update signals with the most recent data. 
@@ -144,22 +375,24 @@ class SignalEngine():
             message: `pubsub_v1.subscriber.message.Message`
                 The message from Cloud pub/sub.
         """
-        if message.attributes:
-            message_time = datetime.utcfromtimestamp(message.publish_time.timestamp())
-            seconds_passed = (datetime.utcnow() - message_time).total_seconds()
-            # get the symbol
+        if message.attributes and 'timestamp' in message.attributes:
+            # get the attributes of the message
             symbol = message.attributes.get("symbol")
-            # only accept messages within 1 seconds latency
-            if seconds_passed <= 1:
+            timestamp = int(message.attributes.get("timestamp"))
+            ticker_time = datetime.utcfromtimestamp(timestamp / 1000)
+            seconds_passed = (datetime.utcnow() - ticker_time).total_seconds()
+            # only accept data below 1 seconds latency
+            if seconds_passed <= 1 and seconds_passed >= 0:
                 if symbol in self.signals and self.signals[symbol].is_open():
+                    # retrieve and decode the full data
+                    data = json.loads(message.data.decode('utf-8'))['data']
                     # begin update to signal object
-                    last_price = json.loads(message.data
-                        .decode('utf-8'))['data']['last_price']
+                    last_price = data['last_price']
                     # update signal with the lastest price
                     self.signals[symbol].update(last_price)
             if self.ticker_counts % self.log_every == 0:
                 logging.info(f"[ticker] cloud pub/sub messages running, "
-                    f"latency: {seconds_passed}s, last-symbol: {symbol}")
+                    f"latency: {seconds_passed} sec, last-symbol: {symbol}")
                 # reset the signal counts to 1
                 self.ticker_counts = 1
             # add the counter for each message received
@@ -175,12 +408,14 @@ class SignalEngine():
             message: `pubsub_v1.subscriber.message.Message`
                 The message from Cloud pub/sub.
         """
-        if message.attributes:
-            message_time = datetime.utcfromtimestamp(message.publish_time.timestamp())
-            seconds_passed = (datetime.utcnow() - message_time).total_seconds()
+        if message.attributes and 'timestamp' in message.attributes:
+            # get the attributes of the message
             symbol = message.attributes.get("symbol")
+            timestamp = int(message.attributes.get("timestamp"))
+            klines_time = datetime.utcfromtimestamp(timestamp / 1000)
+            seconds_passed = (datetime.utcnow() - klines_time).total_seconds()
             # only accept messages within 1 seconds latency
-            if seconds_passed <= 1:
+            if seconds_passed <= 1 and seconds_passed >= 0:
                 # get the symbol of the klines
                 base = message.attributes.get('base')
                 quote = message.attributes.get('quote')
@@ -195,7 +430,7 @@ class SignalEngine():
                     self.run_strategy(base, quote, symbol, klines)
             if self.klines_counts % self.log_every == 0:
                 logging.info(f"[klines] cloud pub/sub messages running, "
-                    f"latency: {seconds_passed}s, last-symbol: {symbol}")
+                    f"latency: {seconds_passed} sec, last-symbol: {symbol}")
                 # reset the signal counts to 1
                 self.klines_counts = 1
             # add the counter for each message received
@@ -219,53 +454,113 @@ class SignalEngine():
             
             Example
             -------
-            .. code-block:: python
-            {
-                "data": {
-                    'open': [25.989999771118164, 25.920000076293945, 25.920000076293945], 
-                    'high': [26.020000457763672, 26.0, 25.96999931335449], 
-                    'low': [25.79999923706055, 25.84000015258789, 25.739999771118164], 
-                    'close': [25.93000030517578, 25.920000076293945, 25.76000022888184], 
-                    'volume': [20038.5703125, 22381.650390625, 12299.23046875], 
-                    'quote_asset_volume': [518945.0625, 580255.5, 317816.84375], 
-                    'number_of_trades': [733, 759, 619], 
-                    'taker_buy_base_vol': [9005.06, 12899.83, 3608.93], 
-                    'taker_buy_quote_vol': [233168.995, 334395.2921, 93283.808], 
-                    'close_time': [1630031399999, 1630032299999, 1630033199999], 
-                    'symbol': ['UNIUSDT', 'UNIUSDT', 'UNIUSDT'], 
-                    'timeframe': ['15m', '15m', '15m']
-                }
-            }
+            Klines data should have all of the listed keys here
+            >>> {
+            ...     "data": {
+            ...         'open': [25.989999771118164, 25.920000076293945, 25.920000076293945], 
+            ...         'high': [26.020000457763672, 26.0, 25.96999931335449], 
+            ...         'low': [25.79999923706055, 25.84000015258789, 25.739999771118164], 
+            ...         'close': [25.93000030517578, 25.920000076293945, 25.76000022888184], 
+            ...         'volume': [20038.5703125, 22381.650390625, 12299.23046875], 
+            ...         'quote_asset_volume': [518945.0625, 580255.5, 317816.84375], 
+            ...         'number_of_trades': [733, 759, 619], 
+            ...         'taker_buy_base_vol': [9005.06, 12899.83, 3608.93], 
+            ...         'taker_buy_quote_vol': [233168.995, 334395.2921, 93283.808], 
+            ...         'close_time': [1630031399999, 1630032299999, 1630033199999], 
+            ...         'symbol': ['UNIUSDT', 'UNIUSDT', 'UNIUSDT'], 
+            ...         'timeframe': ['15m', '15m', '15m']
+            ...     }
+            ... }
         """
         try:
             # will convert klines to dataframe and
             # format the dataframe appropriately
             dataframe = pd.DataFrame(klines)
             dataframe = self.format_dataframe(dataframe)
-            # run technical analysis & inference to layer 2,
-            # await for futures before the remaining tasks.
-            signal = self.strategy.scout(
-                base=base, 
-                quote=quote,
-                dataframe=dataframe, 
-                callback=self.close_signal)
-            # if signal is triggered
-            if signal and signal.symbol not in self.signals: 
-                # save the signal to class attrs
-                self.signals[symbol] = signal
-                # distribute the signal
-                self.distribute_signal(signal)
-                # archive the signal
-                self.archive_signal(signal)
-                # update/set engine state in real-time
-                self.set_enging_state()
+            # ignore highly volatile movements
+            # this will help layer2's ability for 
+            # predicting stationaire market prices
+            symbol = f"{base}{quote}".upper()
+            if (self.is_valid_volatility(dataframe) 
+                and self.is_valid_cooldown(symbol)
+                and symbol not in self.signals): 
+                # run technical analysis & inference to layer 2,
+                # await for futures before the remaining tasks.
+                signal = self.strategy.scout(
+                    base=base, 
+                    quote=quote,
+                    dataframe=dataframe, 
+                    callback=self.close_signal)
+                # if signal is triggered
+                if signal: 
+                    # save the signal to class attrs
+                    self.signals[symbol] = signal
+                    # distribute the signal
+                    self.distribute_signal(signal)
+                    # archive the signal
+                    self.archive_signal(signal)
+                    # update/set engine state in real-time
+                    self.set_enging_state()                 
         except Exception as e:
             logging.error(f"[strategy] Exception caught running-strategy, "
                 f"symbol:-{symbol}, error: {e}")
+            raise RestartPodException(f"[strategy] Unable to connect to "
+                f"firebase rtd pod need to restart, error: {e}")   
         finally:
             # ensure that the symbol is removed
             # from scouts so that there will be no locks.
             self.scouts.remove(symbol)
+    
+    def is_valid_volatility(self, dataframe: pd.DataFrame) -> bool:
+        """ Will check if current volatility is suitable for layer 2.
+
+            Parameters
+            ----------
+            dataframe: `pd.DataFrame`
+                Dataframe containing klines of n-ticks.
+            
+            Returns
+            -------
+            `bool`
+                Return `True` only if volatility does not exceed
+                the allowed volatility for layer2.
+        """
+        rollback = self.buffers['rollback_volatility']
+        # retrieve the OHLC
+        low = np.min(dataframe.iloc[-rollback:].low)
+        high = np.max(dataframe.iloc[-rollback:].high)
+        # check if the current kline spread
+        # is not above maximium volatility
+        return abs(high - low) / low < self.buffers['max_volatility']
+    
+    def is_valid_cooldown(self, symbol: str) -> bool:
+        """ Will check if cooldown time have passed if a pair
+            have completed up to maximum cooldown counter.
+
+            Parameters
+            ----------
+            symbol: `str`
+                The symbol of coin.
+            
+            Returns
+            -------
+            `bool`
+                Return `False` if counter reached cooldown counter
+                but current time have not surpass the cooldown time.
+        """
+        if symbol not in self.cooldowns:
+            self.cooldowns[symbol] = dict(counter=0, cooldown=datetime.utcnow())
+            return True
+        elif self.cooldowns[symbol]['counter'] < self.buffers['cooldown_counter']: 
+            return True
+        elif self.cooldowns[symbol]['counter'] == self.buffers['cooldown_counter']:
+            if datetime.utcnow() >= self.cooldowns[symbol]['cooldown']:
+                # revert back the counter and cooldown
+                self.cooldowns[symbol]['counter'] = 0
+                return True
+            logging.info(f"[cooldown] symbol: {symbol} cooldown reached! " 
+                f"next cooldown reset: {self.cooldowns[symbol]}")
+        return False
 
     def close_signal(self, signal: Signal):
         """ A callback function that will 
@@ -288,7 +583,23 @@ class SignalEngine():
             logging.info(f"current active signals: {self.signals.keys()}")
             # update the real-time database with newly updated dictionary
             self.set_enging_state()
+            # update cooldown if signal completed
+            if signal.status == SignalStatus.COMPLETED:
+                self.update_cooldown(signal.symbol)
     
+    def update_cooldown(self, symbol: str):
+        """ Will update the cooldown counter and time of a symbol.
+
+            Parameters
+            ----------
+            symbol: `str`
+                The symbol to update cooldown
+        """
+        if symbol not in self.cooldowns:
+            self.cooldowns[symbol] = dict(counter=0, cooldown=datetime.utcnow())
+        self.cooldowns[symbol]['counter'] += 1
+        self.cooldowns[symbol]['cooldown'] += timedelta(seconds=self.buffers['cooldown'])
+
     def set_enging_state(self):
         """ Will update database with the current engine state. """
         # set the current engine state to database 
@@ -407,6 +718,64 @@ class SignalEngine():
             'timeout' in params['klines']), "Subscription klines param badly formatted."
         return params
     
+    def _get_max_drawdowns(self) -> dict:
+        """ Will retrieve the maximum drawdown for layer 1. 
+
+            Returns
+            -------
+            `dict`
+                A dictionary containing max drawdowns for 
+                long and short signals.
+            
+            Raises
+            ------
+            `ValueError`
+                will raise if data structure does not match production.
+        """
+        logging.info(f"[get] retrieving-drawdowns from signal database.")
+        max_drawdowns = self.database.get(self.max_drawdowns_ref)
+        if 'long' not in max_drawdowns or 'short' not in max_drawdowns:
+            raise ValueError(f"[max-drawdowns] missing`long` and `short`, instead got: {max_drawdowns.keys()}")
+        logging.info(f"[get] retrieved-max drawdowns: {max_drawdowns} from database.")
+        return dict(long=float(max_drawdowns['long']), 
+            short=float(max_drawdowns['short']))
+    
+    def _get_buffers(self) -> dict:
+        """ Will retrieve the inference buffer time.
+
+            Returns
+            -------
+            `dict`
+                A dictionary of buffers as follows else default buffers
+
+            >>> {
+            ...     "inference": 360,           # the buffer time in sec to inference layer 2
+            ...     "max_volatility": 0.1,      # the % max spread of rollback periods
+            ...     "rollback_volatility": 5    # rollingback klines to check spread
+            ...     "cooldown_counter": 2       # maximum completion before cooldown counter restart.
+            ...     "cooldown": 21600           # cooldown time in sec before another signal.
+            ... }
+
+            Raises
+            ------
+            `ValueError`
+                will raise if data structure does not match production.
+        """
+        keys = ["inference", "max_volatility", "rollback_volatility", "cooldown_counter", "cooldown"]
+        logging.info(f"[get] retrieving-buffer from signal database.")
+        default = dict(inference=360, max_volatility=0.1, 
+            rollback_volatility=5, cooldown_counter=10, cooldown=21600)
+        buffers = self.database.get(self.buffers_ref)
+        for key in keys:
+            if key not in buffers:
+                raise ValueError(f"[buffers] missing buffer key: {key}, instead got: {buffers.keys()}")
+            if not isinstance(buffers[key], float) and not isinstance(buffers[key], int):
+                logging.warn(f"[buffer] non numeric buffer key: {key}, value: {buffers[key]} "
+                    f"will use default buffers instead: {default}")
+                return default
+        logging.info(f"[get] retrieved buffers: {buffers} from database.")
+        return buffers
+
     def _get_thresholds(self) -> dict:
         """ Will retrieve the thresholds for layer1.
             
@@ -415,12 +784,17 @@ class SignalEngine():
             `dict`
                 A dictionary containing thresholds for
                 long and short strategies.
+            
+            Raises
+            ------
+            `ValueError`
+                Will raise if data structure does not match production.
         """
         logging.info(f"[get] retrieving-thresholds from signal database.")
         thresholds = self.database.get(self.thresholds_ref)
         if not thresholds: raise ValueError(f"Thresholds are not set for layer 1!")
         if 'long' not in thresholds or 'short' not in thresholds: 
-            ValueError(f"Thresholds required `long` and `short`, instead got: {thresholds.keys()}")
+            raise ValueError(f"Thresholds required `long` and `short`, instead got: {thresholds.keys()}")
         for dir, threshold in thresholds.items():
             if 'bet_threshold' not in threshold or 'ttp_threshold' not in threshold:
                 raise ValueError(f"Missing `bet_threshold` and/or `ttp_threshold` "
@@ -428,6 +802,35 @@ class SignalEngine():
         logging.info(f"[get] retrieved-thresholds: {thresholds} from database.")
         return thresholds
     
+    def _get_pairs(self) -> dict:
+        """ Will retrieve the pairs for layer1. 
+
+            Returns
+            -------
+            `dict`
+                A dictionary containing long and short pairs
+                allowed to be monitored.
+            
+            Raises
+            ------
+            `ValueError`
+                Will raise if data structure does not match production.
+        """
+        logging.info(f"[get] retrieving-pairs from signal database.")
+        pairs = self.database.get(self.pairs_ref)
+        if not pairs: raise ValueError(f"Pairs are not yet set for layer 1!")
+        # ensure that both long and short thresholds in the data
+        if 'long' not in pairs or 'short' not in pairs: 
+            raise ValueError(f"Pairs required `long` and `short`, instead got: {pairs.keys()}")
+        # ensure that data structure matches with production
+        if not isinstance(pairs['long'], list) or not isinstance(pairs['short'], list):
+            raise ValueError(f"Pairs `long` and `short` must be a list, instead got: {pairs}")
+        logging.info(f"[get] retrieved-pairs: {pairs} from database")
+        # ensure that all pairs uppercase
+        long = [pair.upper() for pair in pairs['long']]
+        short = [pair.upper() for pair in pairs['short']]
+        return dict(long=long, short=short)
+        
     def _get_strategy(self, strategy: str, thresholds: dict) -> Strategy:
         """ Will return the strategy chosen.
 
@@ -448,9 +851,39 @@ class SignalEngine():
             `KeyError`
                 If key id not match or strategy not available.
         """
-        return get_strategy(strategy)(
-            long_spread=thresholds['long']['bet_threshold'],
-            long_ttp=thresholds['long']['ttp_threshold'],
-            short_spread=thresholds['short']['bet_threshold'],
-            short_ttp=thresholds['short']['ttp_threshold'],
-            log_every=self.log_metrics_every)
+        strategy_class = get_strategy(strategy)
+        if self.strategy_type == StrategyType.SUPER_TREND_SQUEEZE:
+            return strategy_class(
+                endpoint=self.endpoint,
+                long_spread=thresholds['long']['bet_threshold'],
+                long_ttp=thresholds['long']['ttp_threshold'],
+                short_spread=thresholds['short']['bet_threshold'],
+                short_ttp=thresholds['short']['ttp_threshold'],
+                pairs=self.pairs,
+                log_every=self.log_metrics_every)
+        elif self.strategy_type == StrategyType.MAX_DRAWDOWN_SQUEEZE:
+            return strategy_class(
+                endpoint=self.endpoint,
+                long_spread=thresholds['long']['bet_threshold'],
+                long_ttp=thresholds['long']['ttp_threshold'],
+                long_max_drawdown=self.max_drawdowns['long'],
+                short_spread=thresholds['short']['bet_threshold'],
+                short_ttp=thresholds['short']['ttp_threshold'],
+                short_max_drawdown=self.max_drawdowns['short'],
+                pairs=self.pairs,
+                log_every=self.log_metrics_every)
+        elif (self.strategy_type == StrategyType.MAX_DRAWDOWN_SPREAD or 
+              self.strategy_type == StrategyType.MAX_DRAWDOWN_SUPER_TREND_SPREAD):
+            return strategy_class(
+                endpoint=self.endpoint,
+                long_spread=thresholds['long']['bet_threshold'],
+                long_ttp=thresholds['long']['ttp_threshold'],
+                long_max_drawdown=self.max_drawdowns['long'],
+                short_spread=thresholds['short']['bet_threshold'],
+                short_ttp=thresholds['short']['ttp_threshold'],
+                short_max_drawdown=self.max_drawdowns['short'],
+                pairs=self.pairs,
+                log_every=self.log_metrics_every,
+                buffer=self.buffers['inference'])
+        else:
+            raise ValueError(f"[strategy] strategy type: {self.strategy_type} not valid!")

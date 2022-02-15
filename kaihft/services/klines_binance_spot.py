@@ -8,6 +8,8 @@ def main(
     n_klines: int, 
     markets: dict, 
     production: bool,
+    exp0a: bool,
+    exp1a: bool,
     topic_path: str = 'klines-binance-v0'):
     """ Retrieve real-time binance data via websocket &
         then publish binance klines to Cloud Pub/Sub. 
@@ -21,13 +23,19 @@ def main(
             retrieve data from websocket.
         production: `bool`
             if `True` publisher will publish to production topic.
+        exp0a: `bool`
+            if `True` publisher will publish to exp0a topic.
+        exp1a: `bool`
+            if `True` publisher will publish to exp1a topic.
         topic_path: `str`
             The topic path to publish klines.
     """
-    if production:
-        topic_path = f"prod-{topic_path}"
-        logging.warn(f"[production-mode] klines: {n_klines}-BINANCE-SPOT, markets: {markets}, topic: prod-{topic_path}")
-    else: topic_path = f'dev-{topic_path}'
+    if production: topic_path = f'prod-{topic_path}'; mode="prediction"
+    elif exp0a: topic_path = f'exp0a-{topic_path}'; mode="experiment-0a"
+    elif exp1a: topic_path = f'exp1a-{topic_path}'; mode="experiment-1a"
+    else: topic_path = f'dev-{topic_path}'; mode="development"
+    logging.warn(f"[{mode}-mode] tickers-BINANCE-SPOT, markets: {markets}, "
+        f"topic: prod-{topic_path}")
     # binance only allows 1024 subscriptions in one stream
     # channels and markets and initiate multiplex stream
     # channels x markets = (total subscription)

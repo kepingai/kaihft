@@ -3,8 +3,15 @@ from concurrent.futures import TimeoutError
 from google.cloud import pubsub_v1
 
 class KaiSubscriberClient():
+    """ Cloud Pub/Sub Subscriber client. """
     def __init__(self, project_id: str = 'keping-ai-continuum'):
-        """ Subscribing messages are handled here."""
+        """ Subscribing messages are handled here.
+
+            Parameters
+            ----------
+            project_id: `str`
+                The project id.
+        """
         self.client = pubsub_v1.SubscriberClient()
         self.project_id = project_id
     

@@ -1,5 +1,6 @@
 import logging
 from kaihft.databases import KaiRealtimeDatabase
+from kaihft.engines.strategy import StrategyType
 from kaihft.publishers.client import KaiPublisherClient
 from kaihft.subscribers.client import KaiSubscriberClient
 from kaihft.engines import SignalEngine
@@ -7,6 +8,8 @@ from kaihft.engines import SignalEngine
 def main(exchange: str,
          strategy: str,
          production: bool,
+         exp0a: bool,
+         exp1a: bool,
          log_every: int,
          log_metrics_every: int,
          timeout: int = None,
@@ -20,6 +23,10 @@ def main(exchange: str,
             A limited strategy choices to run.
         production: `bool`
             if `True` publisher will publish to production topic.
+        exp0a: `bool`
+            if `True` publisher will publish to exp0a topic.
+        exp1a: `bool`
+            if `True` publisher will publish to exp1a topic.
         exchange: `str`
             the exchange name, default to binance.
         timeout: `int`
@@ -31,23 +38,29 @@ def main(exchange: str,
         log_metrics_every: `int`
             Log layer 2 inference metrics every.
     """
-    if production:
-        ticker_topic_path = f'prod-ticker-{exchange}-{version}-sub'
-        klines_topic_path = f'prod-klines-{exchange}-{version}-sub'
-        dist_topic_path = f'prod-distribute-signal-{exchange}-{version}'
-        archive_topic_path = f'prod-signal-{exchange}-{version}'
-        database_ref = f"prod/signals"
-        thresholds_ref = f"prod/thresholds"
-        logging.warn(f"[production-mode] strategy: BINANCE-SPOT-{strategy}"
-            f"paths=ticker: {ticker_topic_path}, klines: {klines_topic_path},"
-            f"distribute: {dist_topic_path}, archive: {archive_topic_path}")
-    else: 
-        ticker_topic_path = f'dev-ticker-{exchange}-{version}-sub'
-        klines_topic_path = f'dev-klines-{exchange}-{version}-sub'
-        dist_topic_path = f'dev-distribute-signal-{exchange}-{version}'
-        archive_topic_path = f'dev-signal-{exchange}-{version}'
-        database_ref = f"dev/signals"
-        thresholds_ref = f"dev/thresholds"
+    # ensure that strategy is valid before starting the signal engine
+    try: strategy = StrategyType(strategy)
+    except Exception as e:
+        logging.error(f"[strategy] strategy: {strategy} is not valid!")
+        raise e
+    # retrieve the appropriate paths for topics and database references
+    if production: path='prod'; endpoint="predict_15m"; mode="production"
+    elif exp0a: path='exp0a'; endpoint="EXP0A_predict_15m"; mode="experiment-0a"
+    elif exp1a: path='exp1a'; endpoint="EXP1A_predict_15m"; mode="experiment-1a"
+    else: path='dev'; endpoint="dev_predict_15m"; mode="development"
+    ticker_topic_path = f'{path}-ticker-{exchange}-{version}-sub'
+    klines_topic_path = f'{path}-klines-{exchange}-{version}-sub'
+    dist_topic_path = f'{path}-distribute-signal-{exchange}-{version}'
+    archive_topic_path = f'{path}-signal-{exchange}-{version}'
+    database_ref = f"{path}/signals"
+    thresholds_ref = f"{path}/thresholds"
+    max_drawdowns_ref = f"{path}/max_drawdowns"
+    buffers_ref = f"{path}/buffers"
+    pairs_ref = f"{path}/pairs"
+    logging.warn(f"[{mode}-mode] strategy: BINANCE-FUTURES-{strategy}"
+        f"paths: ticker: {ticker_topic_path}, klines: {klines_topic_path},"
+        f"distribute: {dist_topic_path}, archive: {archive_topic_path}, "
+        f"layer 2 endpoint: {endpoint}")
     # initialize signal engine class and run it
     params = {
         "ticker": dict(id=ticker_topic_path, timeout=timeout),
@@ -64,6 +77,9 @@ def main(exchange: str,
         database=database,
         database_ref=database_ref,
         thresholds_ref=thresholds_ref,
+        max_drawdowns_ref=max_drawdowns_ref,
+        buffers_ref=buffers_ref,
+        pairs_ref=pairs_ref,
         archive_topic_path=archive_topic_path,
         dist_topic_path=dist_topic_path,
         publisher=publisher,
@@ -72,6 +88,7 @@ def main(exchange: str,
         subscriptions_params=params,
         log_every=log_every,
         log_metrics_every=log_metrics_every,
-        strategy=strategy)
+        strategy=strategy,
+        endpoint=endpoint)
     # run the engine!
     signal_engine.run()

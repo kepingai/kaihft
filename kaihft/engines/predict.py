@@ -34,46 +34,50 @@ def fetch_id_token(audience: str) -> Union[str, None]:
     credentials.refresh(request)
     return credentials.token
 
-def predict(base: str, quote: str, data: dict) -> Union[dict, None]:
+def predict(endpoint: str, base: str, quote: str, data: dict) -> Union[dict, None]:
     """ Forecast the price spread in percentage and direction of
         a generic Coin n ticks to the future and its direction.
 
         Parameters
         ----------
+        endpoint: `str`
+            The endpoint of request to layer 2.
         base: `str`
             The base symbol of the ticker.
         quote: `str`
             The quote symbol of the ticker.
         data: `dict`
             A dictionary of klines lists data.
+        
+        Example
+        -------
+        Acceptable keys in `data` dictionary
+        >>> [
+        ...    'open', 'high', 'low', 'close', 'volume', 'close_time',
+        ...    'quote_asset_volume','number_of_trades','taker_buy_asset_vol',
+        ...    'taker_buy_quote_vol','datetime','ticker','interval', 'timeframe
+        ... ]
             
-        Acceptable keys in data dictionary
-        [
-            'open', 'high', 'low', 'close', 'volume', 'close_time',
-            'quote_asset_volume','number_of_trades','taker_buy_asset_vol',
-            'taker_buy_quote_vol','datetime','ticker','interval', 'timeframe
-        ]
-            
-        ..code-block:: python
-        {
-            "instances": {
-                "data": {
-                    'close': [
-                        2.924000024795532,
-                        2.969899892807007,
-                        2.9554998874664307,
-                        ...
-                    ],
-                    ...
-                    'high': [
-                        2.9398000240325928,
-                        2.970000028610229,
-                        2.97189998626709,
-                    ],
-                    ...
-                }
-            }
-        }
+        `data` should be formatted as follows
+        >>> {
+        ...    "instances": {
+        ...        "data": {
+        ...            'close': [
+        ...                2.924000024795532,
+        ...                2.969899892807007,
+        ...                2.9554998874664307,
+        ...                ...
+        ...            ],
+        ...            ...
+        ...            'high': [
+        ...                2.9398000240325928,
+        ...                2.970000028610229,
+        ...                2.97189998626709,
+        ...            ],
+        ...            ...
+        ...        }
+        ...    }
+        ... }
 
         Returns
         -------
@@ -81,21 +85,29 @@ def predict(base: str, quote: str, data: dict) -> Union[dict, None]:
             A dictionary containing forecasted percentage spread
             of n-tick forward and the direction.
 
-        .. code-block:: python
-        {
-            'base': 'UNI',                                      # base symbol
-            'interval': '15m',                                  # interval of symbol
-            'predictions': {        
-                'direction': 0,                                 # 1 = long and 0 = short
-                'n_tick_forward': 8,                            # forecasted n forward
-                'percentage_spread': 0.16193726658821106        # spread in percentage
-            },
-            'success': True,                                    # validator    
-            'timestamp': 1631646484.79271                       # utc timestamp
-        }
+        Example
+        -------
+        >>> {
+        ...        'base': 'UNI',                               # base pair
+        ...        'interval': '15m',                           # interval timeframe
+        ...        'predictions': {                     
+        ...            'direction': 0,                          # 1 = long and 0 = short
+        ...            'n_tick_forward': 4,                     # forecasted n forward
+        ...            'percentage_arr': [                      # series predictions
+        ...                -0.29120445251464844,
+        ...                -0.30862805247306824,
+        ...                -0.3237372040748596,
+        ...                -0.3499438464641571
+        ...            ],
+        ...            'percentage_spread': 0.3499438464641571  # spread in percentage
+        ...       },
+        ...        'quote': 'USDT',                             # quote pair
+        ...        'success': True,                             # validator    
+        ...        'timestamp': 1639512483.083822               # utc timestamp
+        ...    }
     """
     job_id = "0A"
-    base_url = "https://us-central1-keping-ai-continuum.cloudfunctions.net/predict_15m"
+    base_url = f"https://us-central1-keping-ai-continuum.cloudfunctions.net/{endpoint}"
     model_url = f"{base_url}_{base.lower()}_{quote.lower()}_{job_id}"
     # fetch id token first
     id_token = fetch_id_token(model_url)

@@ -5,6 +5,7 @@ from .client import KaiPublisherClient
 from enum import Enum
 from typing import Tuple
 from datetime import datetime, timedelta
+from kaihft.alerts import RestartPodException
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 from unicorn_binance_websocket_api.unicorn_binance_websocket_api_manager import BinanceWebSocketApiManager
@@ -15,8 +16,14 @@ class KlineStatus(Enum):
     CLOSED = 'CLOSED'
     def __str__(self):
         return str(self.value)
+        
+    def __eq__(self, __o: object) -> bool:
+        if isinstance(__o, str): 
+            return str(self.value).upper() == __o.upper()
+        return super().__eq__(__o)
 
 class BaseTickerKlinesPublisher():
+    """ Base ticker publisher subclass. """
     def __init__(self,
                  name: str,
                  websocket: any,
@@ -25,7 +32,26 @@ class BaseTickerKlinesPublisher():
                  topic_path: str,
                  quotes: list,
                  log_every: int = 100000):
-        """ Base ticker publisher subclass. """
+        """ A helper class with helper functions for publishing ticker & 
+            klines messages. 
+
+            Parameters
+            ----------
+            name: `str`
+                The name of the publisher
+            websocket: `any`
+                The websocket manager.
+            stream_id: `any`
+                The id of the stream.
+            publisher: `KaiPublisherClient`
+                The cloud pub/sub publisher.
+            topic_path: `str`
+                The topic to publish messages to
+            quotes: `list`
+                The cryptocurrency quotes to listen to.
+            log_every: `int`
+                Log ticker and klines every n-iteration.
+        """
         self.name = name
         self.websocket = websocket
         self.stream_id = stream_id
@@ -33,8 +59,10 @@ class BaseTickerKlinesPublisher():
         self.topic_path = topic_path
         self.log_every = log_every
         self.quotes = quotes
-        logging.info(f"ticker publisher initialized {self.name}, {self.websocket}, "
-            f"from: {self.stream_id}, to: {self.topic_path}, will log update every: {self.log_every} messages.")
+
+        logging.info(f"[init] ticker publisher initialized {self.name}, {self.websocket}, "
+            f"from: {self.stream_id}, to: {self.topic_path}, log update every: {self.log_every} messages.")
+    
 
     def format_binance_ticker_to_dict(self, data) -> dict:
         """ Will format binance ticker websocket data to dictionary. 
@@ -51,20 +79,17 @@ class BaseTickerKlinesPublisher():
             exchange=self.name,
             symbol=data["s"],
             timestamp=int(data["E"]),
-            price_change=float(data["p"]),
-            price_change_percent=float(data["P"]),
-            first_trade_price=float(data.get("x")) if data.get("x") else None,
-            last_price=float(data["c"]),
-            last_quantity=float(data["Q"]),
-            best_bid_price=float(data.get("b")) if data.get("b") else None,
-            best_bid_quantity=float(data.get("B")) if data.get("B") else None,
-            best_ask_price=float(data.get("a")) if data.get("a") else None,
-            best_ask_quantity=float(data.get("A")) if data.get("A") else None,
-            open_price=float(data["o"]),
-            high_price=float(data["h"]),
-            low_price=float(data["l"]),
-            total_traded_base_asset_volume=float(data["v"]),
-            total_traded_quote_asset_volume=float(data["q"]))
+            interval=data["k"]["i"],
+            open_price=float(data["k"]["o"]),
+            last_price=float(data["k"]["c"]),
+            high_price=float(data["k"]["h"]),
+            low_price=float(data["k"]["l"]),
+            base_asset_volume=float(data["k"]["v"]),
+            number_of_trades=float(data["k"]["n"]),
+            is_closed=data["k"]["x"],
+            quote_asset_volume=float(data["k"]["q"]),
+            taker_buy_base_asset_volume=float(data["k"]["V"]),
+            taker_buy_quote_asset_volume=float(data["k"]["Q"]))
 
     def format_binance_kline_to_dict(self, data) -> Tuple[dict, bool]:
         """ Will format binance kline websocket data to dictionary. 
@@ -338,6 +363,7 @@ class BinanceUSDMKlinesPublisher(BaseTickerKlinesPublisher):
 
 
 class BinanceTickerPublisher(BaseTickerKlinesPublisher):
+    """ Binance ticker publisher class."""
     def __init__(self,
             websocket: BinanceWebSocketApiManager,
             stream_id: str,
@@ -368,13 +394,17 @@ class BinanceTickerPublisher(BaseTickerKlinesPublisher):
             it to the topic specified during initialization.
         """
         count = 0
+        start = time.time()
         while True:
             # binance spot will only allow 24h max stream
             # connection, this will automatically close the script
-            if self.websocket.is_manager_stopping(): exit(0)
+            # if the last message published was above 30s ago, raise exception
+            last_published = time.time() - start
+            if self.websocket.is_manager_stopping() or last_published >= 30: 
+                raise RestartPodException(f"Websocket manager stopped, last message "
+                    f"published: {round(last_published, 2)} seconds ago, restarting pod!")
             # get and remove the oldest entry from the `stream_buffer` stack
             oldest_stream_data_from_stream_buffer = self.websocket.pop_stream_data_from_stream_buffer()
-            # print the stream data from stream buffer
             if oldest_stream_data_from_stream_buffer is False: time.sleep(0.01)
             else:
                 stream = json.loads(oldest_stream_data_from_stream_buffer)
@@ -388,13 +418,17 @@ class BinanceTickerPublisher(BaseTickerKlinesPublisher):
                     attributes=dict(
                         base=base,
                         quote=quote,
-                        symbol=data['symbol']))
+                        symbol=data['symbol'],
+                        timestamp=str(data["timestamp"])))
+                # restart the time
+                start = time.time()
             count += 1
             if count % self.log_every == 0:
                 logging.info(self.websocket.print_summary(disable_print=True))
                 count = 0
 
 class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
+    """ Binance Klines publisher class. """
     # initialize globals that will be used
     # throughout the exchanges class here.
     __FLOATINGS = [
@@ -474,13 +508,13 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
                                     datetime.utcnow().minute % _interval == 0 else KlineStatus.OPEN)
             # if all successful calculate the
             # the overall execution time and delay if needed
-            logging.info(f"initialized klines: {market}-{interval} - duration: {time.time() - start} seconds")
+            logging.info(f"[init] initialized klines: {market}-{interval} - with duration: {time.time() - start} seconds")
             self.delay(start)
-        logging.info(f"successful kline initializations: {self.markets}-{interval}")
+        logging.info(f"[init] successful kline initializations: {self.markets}-{interval}")
         return markets_klines, kline_status
 
     def to_dataframe(self, symbol: str, interval: str, klines: list) -> pd.DataFrame:
-        """Will convert klines from binance to dataframe.
+        """ Will convert klines from binance to dataframe.
 
             Parameters
             ----------
@@ -521,10 +555,15 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
             it to the topic specified during initialization.
         """
         count = 0
+        start = time.time()
         while True:
             # binance spot will only allow 24h max stream
             # connection, this will automatically close the script
-            if self.websocket.is_manager_stopping(): exit(0)
+            # if the last message published was above 30s ago, raise exception
+            last_published = time.time() - start
+            if self.websocket.is_manager_stopping() or last_published >= 30: 
+                raise RestartPodException(f"Websocket manager stopped, last message "
+                    f"published: {round(last_published, 2)} seconds ago, restarting pod!")
             # get and remove the oldest entry from the `stream_buffer` stack
             oldest_stream_data_from_stream_buffer = self.websocket.pop_stream_data_from_stream_buffer()
             # print the stream data from stream buffer
@@ -548,7 +587,10 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
                     attributes=dict(
                         base=base,
                         quote=quote,
-                        symbol=symbol))
+                        symbol=symbol,
+                        timestamp=str(stream['data']["E"])))
+                # restart the time
+                start = time.time()
             count += 1
             if count % self.log_every == 0:
                 logging.info(self.websocket.print_summary(disable_print=True))
@@ -572,23 +614,21 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
 
             Example
             -------
-            .. code-block:: python
-            {
-                'open': [25.989999771118164, 25.920000076293945, 25.920000076293945], 
-                'high': [26.020000457763672, 26.0, 25.96999931335449], 
-                'low': [25.79999923706055, 25.84000015258789, 25.739999771118164], 
-                'close': [25.93000030517578, 25.920000076293945, 25.76000022888184], 
-                'volume': [20038.5703125, 22381.650390625, 12299.23046875], 
-                'quote_asset_volume': [518945.0625, 580255.5, 317816.84375], 
-                'number_of_trades': [733, 759, 619], 
-                'taker_buy_base_vol': [9005.06, 12899.83, 3608.93], 
-                'taker_buy_quote_vol': [233168.995, 334395.2921, 93283.808], 
-                'close_time': [1630031399999, 1630032299999, 1630033199999], 
-                'symbol': ['UNIUSDT', 'UNIUSDT', 'UNIUSDT'], 
-                'timeframe': ['15m', '15m', '15m']
-            }
+            >>> {
+            ...    'open': [25.989999771118164, 25.920000076293945, 25.920000076293945], 
+            ...    'high': [26.020000457763672, 26.0, 25.96999931335449], 
+            ...    'low': [25.79999923706055, 25.84000015258789, 25.739999771118164], 
+            ...    'close': [25.93000030517578, 25.920000076293945, 25.76000022888184], 
+            ...    'volume': [20038.5703125, 22381.650390625, 12299.23046875], 
+            ...    'quote_asset_volume': [518945.0625, 580255.5, 317816.84375], 
+            ...    'number_of_trades': [733, 759, 619], 
+            ...    'taker_buy_base_vol': [9005.06, 12899.83, 3608.93], 
+            ...    'taker_buy_quote_vol': [233168.995, 334395.2921, 93283.808], 
+            ...    'close_time': [1630031399999, 1630032299999, 1630033199999], 
+            ...    'symbol': ['UNIUSDT', 'UNIUSDT', 'UNIUSDT'], 
+            ...    'timeframe': ['15m', '15m', '15m']
+            ... }
         """
-        # TODO: FIX THIS KLINE UPDATE MECHANISM
         # retrieve the specific klines
         # of the specific symbol and status
         status = self.kline_status[symbol]
