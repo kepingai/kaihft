@@ -81,7 +81,7 @@ def klines_binance_futures(klines, production, exp0a, exp1a):
 @click.option('--klines', default=250, help='the length of historical klines back.')
 @click.option('--production', is_flag=True, help='publish messages to production topic.')
 @click.option('--timeframe', default=15, help='market timeframe to stream')
-# @notify_failure
+@notify_failure
 def klines_binance_usdm(klines, production, timeframe):
     services.klines_binance_usdm.main(
         n_klines=klines,
@@ -91,7 +91,7 @@ def klines_binance_usdm(klines, production, timeframe):
 
 @cli.command()
 @click.option('--production', is_flag=True, help='publish messages to production topic.')
-# @notify_failure
+@notify_failure
 def ticker_binance_usdm(production):
     services.ticker_binance_usdm.main(
         production=production)
