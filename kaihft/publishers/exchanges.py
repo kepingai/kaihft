@@ -1,7 +1,6 @@
-from multiprocessing import Value
 import pandas as pd
 import time, json, logging, asyncio
-from typing import Dict, Tuple
+from typing import Dict
 from .client import KaiPublisherClient
 from enum import Enum
 from typing import Tuple
@@ -11,8 +10,6 @@ from binance.client import Client
 from binance.exceptions import BinanceAPIException
 from unicorn_binance_websocket_api.unicorn_binance_websocket_api_manager import BinanceWebSocketApiManager
 from kaihft.databases import KaiRealtimeDatabase
-
-import psutil
 
 
 class KlineStatus(Enum):
@@ -26,6 +23,7 @@ class KlineStatus(Enum):
         if isinstance(__o, str): 
             return str(self.value).upper() == __o.upper()
         return super().__eq__(__o)
+
 
 class BaseTickerKlinesPublisher():
     """ Base ticker publisher subclass. """
@@ -67,7 +65,6 @@ class BaseTickerKlinesPublisher():
 
         logging.info(f"[init] ticker publisher initialized {self.name}, {self.websocket}, "
             f"from: {self.stream_id}, to: {self.topic_path}, log update every: {self.log_every} messages.")
-    
 
     def format_binance_ticker_to_dict(self, data) -> dict:
         """ Will format binance ticker websocket data to dictionary. 
@@ -283,8 +280,9 @@ class BinanceUSDMKlinesPublisher(BaseTickerKlinesPublisher):
     async def _run(self):
         """ This function runs stream klines and listen_pairs concurrently.
         """
-        await asyncio.gather(self.stream_klines(),
-                             self.listen_pairs(self.restart_pod))
+        await asyncio.gather(self.listen_pairs(self.restart_pod),
+                             self.stream_klines()
+                             )
 
     async def stream_klines(self):
         """ Use the binance websocket to stream the latest candle data from binance.
@@ -305,7 +303,7 @@ class BinanceUSDMKlinesPublisher(BaseTickerKlinesPublisher):
             else:
                 stream = json.loads(oldest_stream_data_from_stream_buffer)
                 if 'data' not in stream:
-                    return None
+                    continue
 
                 # format the data from websocket, to make sure all exchanges have the same final format
                 data, closed = self.format_binance_kline_to_dict(stream['data']['k'])
@@ -325,6 +323,7 @@ class BinanceUSDMKlinesPublisher(BaseTickerKlinesPublisher):
                         base=base,
                         quote=quote,
                         symbol=symbol))
+
             count += 1
             if count % self.log_every == 0:
                 logging.info(self.websocket.print_summary(disable_print=True))
@@ -403,11 +402,10 @@ class BinanceUSDMKlinesPublisher(BaseTickerKlinesPublisher):
             callback: `callable`
                 A function to callback to listen for events.
         """
-        while True:
-            self.listener_pairs = self.database.listen(
-                reference=self.pairs_ref,
-                callback=callback
-                )
+        self.listener_pairs = self.database.listen(
+            reference=self.pairs_ref,
+            callback=callback
+            )
 
     def restart_pod(self, event):
         """ This function checks the event every time listen pairs is called.
@@ -425,14 +423,14 @@ class BinanceUSDMKlinesPublisher(BaseTickerKlinesPublisher):
 
         """
         # get the pairs from the event and combine the long and short pairs.
-        markets_long_short = event.data
-        markets = list(set().union(markets_long_short['long'], markets_long_short['short']))
-
-        if markets == self.markets:
-            return None
-
+        if str(event.event_type) != 'put' or event.data is None:
+            pass
+        elif str(event.path) == '/':
+            logging.info("First event. Pairs not updated!")
+            pass
         else:
-            logging.info("Changed trading pairs. Restarting pod")
+            logging.info(f"Pairs {event.data} updated")
+            logging.info("Updated trading pairs. Restarting pod")
             raise RestartPodException
 
 
@@ -483,6 +481,7 @@ class BinanceUSDMTickerPublisher(BaseTickerKlinesPublisher):
                                           f"published: {round(last_published, 2)} seconds ago, restarting pod!")
             # get and remove the oldest entry from the `stream_buffer` stack
             oldest_stream_data_from_stream_buffer = self.websocket.pop_stream_data_from_stream_buffer()
+
             if oldest_stream_data_from_stream_buffer is False:
                 time.sleep(0.01)
             else:
@@ -500,7 +499,7 @@ class BinanceUSDMTickerPublisher(BaseTickerKlinesPublisher):
                     origin=self.__class__.__name__,
                     topic_path=self.topic_path,
                     data=datas,
-                    attributes=dict(timestamp=datetime.utcnow()))
+                    attributes=dict(timestamp=str(datetime.utcnow())))
 
                 # restart the time
                 start = time.time()
