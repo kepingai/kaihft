@@ -3,6 +3,8 @@ from kaihft.publishers.exchanges import BinanceUSDMKlinesPublisher
 from kaihft.publishers.client import KaiPublisherClient
 from binance.client import Client
 from unicorn_binance_websocket_api.unicorn_binance_websocket_api_manager import BinanceWebSocketApiManager
+from kaihft.alerts import RestartPodException
+from kaihft.databases import KaiRealtimeDatabase
 
 
 def main(
@@ -31,15 +33,22 @@ def main(
         n_hour = timeframe / 60
         channels = [f"kline_{n_hour}h"]
 
-    # initialize python binance client
-    client = Client("", "")
-    markets = [ticker['symbol'] for ticker in client.get_all_tickers()]
+    # get the list of tickers for inference
+    database = KaiRealtimeDatabase()
 
     if production:
+        pairs_ref = 'prod/pairs'
+        markets_long_short = database.get(pairs_ref)
+        markets = list(set().union(markets_long_short['long'], markets_long_short['short']))
         topic_path = f"prod-{topic_path}"
-        logging.warn(f"[production-mode] klines: {n_klines}-BINANCE-SPOT, markets: {markets}, topic: prod-{topic_path}")
+        logging.warn(f"[production-mode] klines: {n_klines}-BINANCE-USDM, "
+                     f"markets: {markets}, topic: prod-{topic_path}")
     else:
+        pairs_ref = 'dev/pairs'
+        markets_long_short = database.get(pairs_ref)
+        markets = list(set().union(markets_long_short['long'], markets_long_short['short']))
         topic_path = f'dev-{topic_path}'
+        print('list of markets: ', markets)
     # binance only allows 1024 subscriptions in one stream
     # channels and markets and initiate multiplex stream
     # channels x markets = (total subscription)
@@ -57,11 +66,15 @@ def main(
     # initialize binance klines publisher
     # and run the publisher.
     klines_publisher = BinanceUSDMKlinesPublisher(
-        client=client,
+        client=Client("", ""),
         websocket=binance_websocket_api_manager,
+        markets=markets,
         stream_id=stream_id,
         publisher=publisher,
         topic_path=topic_path,
         n_klines=n_klines,
-        timeframe=timeframe)
+        timeframe=timeframe,
+        database=database,
+        pairs_ref=pairs_ref)
     klines_publisher.run()
+

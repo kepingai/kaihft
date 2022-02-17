@@ -89,6 +89,14 @@ def klines_binance_usdm(klines, production, timeframe):
         timeframe=timeframe)
 
 
+@cli.command()
+@click.option('--production', is_flag=True, help='publish messages to production topic.')
+# @notify_failure
+def ticker_binance_usdm(production):
+    services.ticker_binance_usdm.main(
+        production=production)
+
+
 @click.option('--strategy', default="SUPER_TREND_SQUEEZE", help="Available strategies: [SUPERTREND_SQUEEZE, MAX_DRAWDOWN_SQUEEZE, MAX_DRAWDOWN_SPREAD, MAX_DRAWDOWN_SUPER_TREND_SPREAD]")
 @click.option('--version', default='v0', help="The version of signal engine.")
 @click.option('--log-every', default=1000, help="Log cloud pub/sub messages every.")
