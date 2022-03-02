@@ -1,8 +1,13 @@
 from typing import Union
 import requests, json, logging
 import google.auth.transport.requests
+import os
+from typing import Tuple
+
 
 __CRED = 'credentials.json'
+os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'credentials.json'
+
 
 def fetch_id_token(audience: str) -> Union[str, None]:
     """ Will return the id token for specific service url. 
@@ -33,6 +38,7 @@ def fetch_id_token(audience: str) -> Union[str, None]:
         return None
     credentials.refresh(request)
     return credentials.token
+
 
 def predict(endpoint: str, base: str, quote: str, data: dict) -> Union[dict, None]:
     """ Forecast the price spread in percentage and direction of
@@ -121,3 +127,116 @@ def predict(endpoint: str, base: str, quote: str, data: dict) -> Union[dict, Non
     logging.warn(f"[predict] failed inferencing to layer 2, "
         f"status-code:{result.status_code}, symbol: {base}{quote}")
     return None
+
+
+def predict_cloud_run(base: str,
+                      quote: str,
+                      data: dict,
+                      mode: str,
+                      kaiforecast_version: str,
+                      ha_trend: int,
+                      timeframe: str = '1m') -> Tuple[dict, dict]:
+    """ Function to perform prediction using regression and classification TFT models served on Google
+        Cloud Run. The data is similar to the predict function.
+
+        Parameters
+        ----------
+        base: `str`
+            the pair's base
+        quote: `str`
+            the pair's quote
+        data: `dict`
+            the data as the input into the model
+        mode: `str`
+            prod or dev
+        kaiforecast_version: `str`
+            kaiforecast version used. Necessary for the cloud run
+        ha_trend: `int`
+            current heikin ashi trend, to determine long and short
+        timeframe: `str`
+            timeframe used for the model
+
+        Returns
+        -------
+        `Tuple[dict, dict]`
+            A dictionary containing forecasted percentage spread
+            of n-tick forward and the direction.
+
+        Example
+        -------
+        Regression output
+        >>> {
+        ...        'base': 'UNI',                               # base pair
+        ...        'interval': '15m',                           # interval timeframe
+        ...        'predictions': {
+        ...            'direction': 0,                          # 1 = long and 0 = short
+        ...            'n_tick_forward': 4,                     # forecasted n forward
+        ...            'percentage_arr': [                      # series predictions
+        ...                -0.29120445251464844,
+        ...                -0.30862805247306824,
+        ...                -0.3237372040748596,
+        ...                -0.3499438464641571
+        ...            ],
+        ...            'percentage_spread': 0.3499438464641571  # spread in percentage
+        ...       },
+        ...        'quote': 'USDT',                             # quote pair
+        ...        'success': True,                             # validator
+        ...        'timestamp': 1639512483.083822               # utc timestamp
+        ...    }
+
+        Classificationn output
+        >>> {
+        ...        'base': 'UNI',                               # base pair
+        ...        'interval': '15m',                           # interval timeframe
+        ...        'predictions': [0.6, 0.4],                   # prediction output
+        ...        'quote': 'USDT',                             # quote pair
+        ...        'success': True,                             # validator
+        ...        'timestamp': 1639512483.083822               # utc timestamp
+        ...    }
+
+    """
+    if ha_trend == 1:
+        direction = 'long'
+    elif ha_trend == -1:
+        direction = 'short'
+    else:
+        direction = None
+
+    if direction is not None and base == 'BTC':
+        cls_endpoint = f"https://{mode}-{kaiforecast_version}---"\
+                       f"{base.lower()}-predict-classification-{direction}-{timeframe}-wvgsvdm4ya-uc.a.run.app"
+        reg_endpoint = f"https://{mode}-{kaiforecast_version}---"\
+                       f"{base.lower()}-predict-regression-{timeframe}-wvgsvdm4ya-uc.a.run.app"
+
+        # inference regression
+        # id_token = fetch_id_token(audience=reg_endpoint)
+        id_token = os.popen('gcloud auth print-identity-token').read().strip()
+        headers = {"Authorization": f'bearer {id_token}', "content-type": 'application/json'}
+        params = dict(instances=dict(data=data))
+        reg_result = requests.post(reg_endpoint, data=json.dumps(params), headers=headers)
+
+        if reg_result.status_code == 200 and reg_result.content:
+            reg_result = reg_result.json()
+        else:
+            logging.warning(f"[predict] failed inferencing to layer 2 regression model, "
+                            f"status-code:{reg_result.status_code}, symbol: {base}{quote}")
+            return None, None
+
+        # inference classification
+        # id_token = fetch_id_token(audience=cls_endpoint)
+        id_token = os.popen('gcloud auth print-identity-token').read().strip()
+        headers = {"Authorization": f'bearer {id_token}', "content-type": 'application/json'}
+        params = dict(instances=dict(data=data))
+        cls_result = requests.post(cls_endpoint, data=json.dumps(params), headers=headers)
+
+        if cls_result.status_code == 200 and cls_result.content:
+            cls_result = cls_result.json()
+        else:
+            logging.warning(f"[predict] failed inferencing to layer 2 classification model, "
+                            f"status-code:{cls_result.status_code}, symbol: {base}{quote}")
+            return None, None
+
+        return reg_result, cls_result
+
+    else:
+        return None, None

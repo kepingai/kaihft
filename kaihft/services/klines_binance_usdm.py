@@ -29,9 +29,11 @@ def main(
     # we stream mark price and all market pairs
     if timeframe < 60:
         channels = [f"kline_{timeframe}m"]
+        topic_path = f"{topic_path}-{timeframe}m"
     else:
         n_hour = timeframe / 60
         channels = [f"kline_{n_hour}h"]
+        topic_path = f"{topic_path}-{n_hour}h"
 
     # get the list of tickers for inference
     database = KaiRealtimeDatabase()
@@ -46,8 +48,9 @@ def main(
     else:
         pairs_ref = 'dev/pairs'
         markets_long_short = database.get(pairs_ref)
-        markets = list(set().union(markets_long_short['long'], markets_long_short['short']))
+        # markets = list(set().union(markets_long_short['long'], markets_long_short['short']))
         topic_path = f'dev-{topic_path}'
+        markets = ['BTCUSDT']
         print('list of markets: ', markets)
     # binance only allows 1024 subscriptions in one stream
     # channels and markets and initiate multiplex stream

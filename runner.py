@@ -1,4 +1,7 @@
-import click, logging, sys
+import click
+import logging
+import sys
+import json
 import kaihft.services as services
 from kaihft.alerts import notify_failure
 
@@ -97,6 +100,7 @@ def ticker_binance_usdm(production):
         production=production)
 
 
+@cli.command()
 @click.option('--strategy', default="SUPER_TREND_SQUEEZE", help="Available strategies: [SUPERTREND_SQUEEZE, MAX_DRAWDOWN_SQUEEZE, MAX_DRAWDOWN_SPREAD, MAX_DRAWDOWN_SUPER_TREND_SPREAD]")
 @click.option('--version', default='v0', help="The version of signal engine.")
 @click.option('--log-every', default=1000, help="Log cloud pub/sub messages every.")
@@ -104,9 +108,16 @@ def ticker_binance_usdm(production):
 @click.option('--production', is_flag=True, help='Publish & subscribe messages to production topic.')
 @click.option('--exp0a', is_flag=True, help='Publish & subscribe messages to exp0a topic.')
 @click.option('--exp1a', is_flag=True, help='Publish & subscribe messages to exp1a topic.')
-@notify_failure
-def signal_binance_futures(strategy, version, log_every, log_metrics_every, 
-    production, exp0a, exp1a):
+@click.option('--strategy-params-path', default='', help='The path to json file which contains the params for the strategy')
+# @notify_failure
+def signal_binance_futures(strategy, version, log_every, log_metrics_every,
+                           production, strategy_params_path, exp0a, exp1a):
+    if strategy_params_path == '':
+        strategy_params = {}
+    else:
+        with open(strategy_params_path, 'r') as fp:
+            strategy_params = json.load(fp)
+
     services.signal_engine.main(
         exchange='binance',
         strategy=strategy,
@@ -115,7 +126,8 @@ def signal_binance_futures(strategy, version, log_every, log_metrics_every,
         exp1a=exp1a,
         version=version,
         log_every=log_every,
-        log_metrics_every=log_metrics_every)
+        log_metrics_every=log_metrics_every,
+        strategy_params=strategy_params)
 
 
 if __name__ == "__main__":

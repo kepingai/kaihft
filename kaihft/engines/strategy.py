@@ -1,4 +1,5 @@
-import time, logging
+import time
+import logging
 import pandas as pd
 import numpy as np
 import numexpr as ne
@@ -6,15 +7,21 @@ import pandas_ta as ta
 from enum import Enum
 from typing import Union, Tuple
 from .signal import Signal
-from .predict import predict
+from .predict import predict, predict_cloud_run
 from datetime import datetime, timedelta
 from abc import abstractmethod
+from google.cloud import pubsub_v1
+import json
+import os
+import requests
+
 
 class StrategyType(Enum):
     SUPER_TREND_SQUEEZE = "SUPER_TREND_SQUEEZE"
     MAX_DRAWDOWN_SQUEEZE = "MAX_DRAWDOWN_SQUEEZE"
     MAX_DRAWDOWN_SPREAD = "MAX_DRAWDOWN_SPREAD"
     MAX_DRAWDOWN_SUPER_TREND_SPREAD = "MAX_DRAWDOWN_SUPER_TREND_SPREAD"
+    HEIKIN_ASHI_COINSSPOR = "HEIKIN_ASHI_COINSSPOR"
 
     def __str__(self):
         """ Convert the enum object to string. 
@@ -25,6 +32,7 @@ class StrategyType(Enum):
                 The exchange enum object as string.
         """
         return str(self.value)
+
     def __eq__(self, __o: object) -> bool:
         if isinstance(__o, str): 
             return str(self.value).upper() == __o.upper()
@@ -106,10 +114,10 @@ class Strategy():
             )
         elif self.strategy == StrategyType.SUPER_TREND_SQUEEZE:
             return (float(pred['percentage_spread']), 
-                int(pred['direction']), 
-                int(pred['n_tick_forward']),
-                str(result['base']), 
-                str(result['quote']))
+                    int(pred['direction']),
+                    int(pred['n_tick_forward']),
+                    str(result['base']),
+                    str(result['quote']))
         else:
             logging.error(f"[layer2] strategy: {self.strategy} is not implemented yet!")
         return None, None, None, base, quote
@@ -226,6 +234,308 @@ class Strategy():
             self.buffers[symbol] = datetime.utcnow() + timedelta(seconds=self.buffer)
             return True
         return False
+
+
+class HeikinAshiCoinsspor(Strategy):
+    """ Heikin Ashi Coinsspor strategy implementation
+        will scout for potential actionable
+        intelligence based on a specific market behavior.
+    """
+    def __init__(self,
+                 mode: str,
+                 kaiforecast_version: str,
+                 classification_threshold: float,
+                 long_spread: float,
+                 short_spread: float,
+                 long_ttp: float,
+                 short_ttp: float,
+                 pairs: dict,
+                 ha_timeframe: str,
+                 model_timeframe: str,
+                 ha_ema_len: int,
+                 log_every: int):
+
+        super(HeikinAshiCoinsspor, self).__init__(
+            name=str(StrategyType.HEIKIN_ASHI_COINSSPOR),
+            strategy=StrategyType.HEIKIN_ASHI_COINSSPOR,
+            description="Heikin-Ashi Buy and Sell Strategy by Coinsspor",
+            endpoint='',
+            long_spread=long_spread,
+            long_ttp=long_ttp,
+            short_spread=short_spread,
+            short_ttp=short_ttp,
+            pairs=pairs,
+            log_every=log_every)
+
+        self.ha_timeframe = ha_timeframe
+        self.model_timeframe = model_timeframe
+        self.ha_ema_len = ha_ema_len
+        self.classification_threshold = classification_threshold
+        self.ha_trend = 0
+        self.mode = mode
+        self.kaiforecast_version = kaiforecast_version
+
+    def scout(self,
+              base: str,
+              quote: str,
+              dataframe: pd.DataFrame,
+              callback: callable) -> Union[Signal, None]:
+        """ Scouts potential signals based on Heikin Ashi candles and TFT 1m predictions
+
+            Parameters
+            ----------
+            base: `str`
+                base to predict
+            quote: `str`
+                the pair's quote
+            dataframe: `pd.DataFrame`
+                the dataframe of the timeseries data to predict
+            callback: `callable`
+                a function which is called if the signal is closed
+
+            Returns
+            -------
+            `Union[Signal, None]`
+                a signal object, is returned if the conditions to create a
+                signal are met. Otherwie returns None
+
+        """
+        start = time.time()
+        signal = False
+        clean_df = dataframe.copy()
+        # format the clean df before inference
+        clean_df.rename(columns=dict(timeframe="interval",
+                                     symbol="ticker",
+                                     taker_buy_base_vol="taker_buy_asset_vol"),
+                        inplace=True)
+        clean_df = clean_df[['open', 'high', 'low', 'close', 'volume', 'close_time',
+                             'quote_asset_volume', 'number_of_trades', 'taker_buy_asset_vol',
+                             'taker_buy_quote_vol', 'datetime', 'ticker', 'interval']]
+
+        last_price = clean_df.iloc[-1].close
+        open_price = clean_df.iloc[-1].open
+        pair = f"{base}{quote}".upper()
+
+        if self.ha_trend == 1 and pair in self.pairs['long'] and last_price > open_price:
+            # inference to layer 2
+            _spread, _direction, _n_tick, base, quote = self.layer2(
+                base=base,
+                quote=quote,
+                data=clean_df.to_dict('list'),
+                mode=self.mode,
+                kaiforecast_version=self.kaiforecast_version,
+                ha_trend=self.ha_trend)
+
+            print(_spread, _direction, _n_tick, base, quote)
+            if _spread is None or _direction is None: return None
+            # ensure that spread is above threshold and direction matches.
+            if _spread >= self.long_spread and _direction == 1:
+                ttp = self.long_ttp
+                signal = True
+            # record the ending time of analysis
+            self.save_metrics(start, f"{base}{quote}")
+
+        # else if direction is short and squeeze is off and red candle
+        elif self.ha_trend == -1 and pair in self.pairs['short'] and last_price < open_price:
+            # inference to layer 2
+            _spread, _direction, _n_tick, base, quote = self.layer2(
+                base=base,
+                quote=quote,
+                data=clean_df.to_dict('list'),
+                mode=self.mode,
+                kaiforecast_version=self.kaiforecast_version,
+                ha_trend=self.ha_trend
+            )
+
+            print(_spread, _direction, _n_tick, base, quote)
+            if _spread is None or _direction is None: return None
+            # ensure that spread is above threshold and direction matches.
+            if _spread >= self.short_spread and _direction == 1:
+                ttp = self.short_ttp
+                signal = True
+            # record the ending time of analysis
+            self.save_metrics(start, f"{base}{quote}")
+
+        return Signal(
+            base=base,
+            quote=quote,
+            take_profit=ttp,
+            spread=_spread,
+            buffer=_n_tick,
+            purchase_price=float(last_price),
+            last_price=float(last_price),
+            direction=_direction,
+            callback=callback,
+            n_tick_forward=_n_tick) if signal else None
+
+    def layer2(self,
+               base: str,
+               quote: str,
+               data: dict,
+               mode: str,
+               kaiforecast_version: str,
+               ha_trend: int
+               ):
+        """ Connect to layer 2 and inference to specific model.
+
+            Parameters
+            ----------
+            base: `str`
+                The base symbol of the ticker.
+            quote: `str`
+                The quote symbol of the ticker.
+            data: `dict`
+                Dictionary containing list of klines.
+            mode: `str`
+            kaiforecast_version: `str`
+            ha_trend: `int`
+
+            Returns
+            -------
+            `(float, int, int, str, str)`
+                If prediction is successful it will return the
+                percentage spread, direction, the number of n-tick
+                predicted forward, the base pair and the quote pair.
+        """
+        reg_result, cls_result = predict_cloud_run(mode=mode,
+                                                   kaiforecast_version=kaiforecast_version,
+                                                   base=base,
+                                                   quote=quote,
+                                                   data=data,
+                                                   timeframe=self.model_timeframe,
+                                                   ha_trend=ha_trend)
+
+        # if prediction fails return nones
+        if not reg_result and not cls_result:
+            return None, None, None, base, quote
+
+        else:
+            cls_prob = cls_result['predictions']
+            if cls_prob[0] > cls_prob[1] and cls_prob[0] > self.classification_threshold:
+                _spread = reg_result['predictions']['percentage_spread']
+                _direction = reg_result['predictions']['direction']
+                _n_ticks = reg_result['predictions']['n_tick_forward']
+                return _spread, _direction, _n_ticks, base, quote
+            else:
+                return None, None, None, base, quote
+
+    def calculate_heikin_ashi_trend(self,
+                                    message: pubsub_v1.subscriber.message.Message):
+        """ This function calculates the buy and sell signals based on Coinsspor Heikin Ashi Tradingview signals.
+
+            Parameters
+            ----------
+            message: `pubsub_v1.subscriber.message.Message`
+                message containing the klines which will be analysed using Heikin-Ashi
+
+        """
+        if message.attributes and 'timestamp' in message.attributes:
+            # get the attributes of the message
+            symbol = message.attributes.get("symbol")
+            timestamp = int(message.attributes.get("timestamp"))
+            klines_time = datetime.utcfromtimestamp(timestamp / 1000)
+            seconds_passed = (datetime.utcnow() - klines_time).total_seconds()
+            # only accept messages within 1 seconds latency
+            if 100 >= seconds_passed >= 0:
+                # get the symbol of the klines
+                base = message.attributes.get('base')
+                quote = message.attributes.get('quote')
+                # only run strategy if symbol is currently
+                # not an ongoing signal and also not currently
+                # awaiting for a result from running strategy
+
+                # run a separate thread to run startegy
+                klines = pd.DataFrame(json.loads(message.data.decode('utf-8'))['data'])
+                ha_dataframe = self.format_dataframe(klines)
+
+                # ohlc4 is a tradingview variable. It is the average of the OHLC value
+                ohlc4 = (ha_dataframe['open'] + ha_dataframe['high'] + ha_dataframe['low'] + ha_dataframe[
+                    'close']) / 4
+
+                # calculate the heiken ashi candles and rename the columns so that we can calculate the EMA
+                heikin_ashi_klines = ha_dataframe.ta.ha()
+                heikin_ashi_klines = heikin_ashi_klines.rename(
+                    columns={'HA_open': 'open', 'HA_high': 'high', 'HA_low': 'low', 'HA_close': 'close'})
+
+                # start calculation. See tradingview for reference
+                hac = pd.DataFrame((ohlc4 + heikin_ashi_klines['open'].fillna(0)
+                                    + pd.concat([ha_dataframe['high'], heikin_ashi_klines['open'].fillna(0)]).max(
+                            level=0)
+                                    + pd.concat([ha_dataframe['low'], heikin_ashi_klines['open'].fillna(0)]).min(
+                            level=0)) / 4,
+                                   columns=['close'])
+                ema1 = pd.DataFrame(hac.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                ema2 = pd.DataFrame(ema1.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                ema3 = pd.DataFrame(ema2.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                tma1 = 3 * ema1 - 3 * ema2 + ema3
+                ema4 = pd.DataFrame(tma1.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                ema5 = pd.DataFrame(ema4.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                ema6 = pd.DataFrame(ema5.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                tma2 = 3 * ema4 - 3 * ema5 + ema6
+                ipek = tma1 - tma2
+                yasin = tma1 + ipek
+                hlc3 = pd.DataFrame((ha_dataframe['high'] + ha_dataframe['low'] + ha_dataframe['close']) / 3,
+                                    columns=['close'])
+                ema7 = pd.DataFrame(hlc3.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                ema8 = pd.DataFrame(ema7.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                ema9 = pd.DataFrame(ema8.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                tma3 = 3 * ema7 - 3 * ema8 + ema9
+                ema10 = pd.DataFrame(tma3.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                ema11 = pd.DataFrame(ema10.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                ema12 = pd.DataFrame(ema11.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                tma4 = 3 * ema10 - 3 * ema11 + ema12
+
+                # These are some turkish words. mavi means blue and kirmizi means red.
+                # if mavi > kirmizi, we are in an uptrend and vice versa.
+                # No idea what ipek and yasin mean. I just followed the vocab he used in tradingview.
+                ipek1 = tma3 - tma4
+                yasin1 = tma3 + ipek1
+                mavi = yasin1.fillna(0)
+                kirmizi = yasin.fillna(0)
+
+                # define trend for long and short positions
+                # if True, it means the model can go long. If False, the model can go short
+                trend = np.array(np.array(mavi) > np.array(kirmizi))
+
+                self.ha_trend = 1 if np.all(trend[-2:]) else -1
+
+        # acknowledge the message
+        message.ack()
+
+    def format_dataframe(self, dataframe: pd.DataFrame) -> pd.DataFrame:
+        """ Will format the dataframe to ensure appropriate format for
+            inferencing to layer 2 without errors.
+
+            Parameters
+            ----------
+            dataframe: `pd.DataFrame`
+                The dataframe to format.
+
+            Returns
+            -------
+            `pd.DataFrame`
+                Newly formatted dataframe.
+        """
+        ohlcv = ['open', 'high', 'close', 'low', 'volume']
+        # convert the close time to utc string datetime
+        dataframe['datetime'] = dataframe.close_time.apply(
+            lambda x: str(pd.to_datetime(datetime.fromtimestamp(
+                (x / 1000)).strftime('%c'))))
+        dataframe[ohlcv] = dataframe[ohlcv].astype('float32')
+        return dataframe
+
 
 class SuperTrendSqueeze(Strategy):
     """ SuperTrend Squeeze strategy implementation
@@ -545,6 +855,7 @@ class MaxDrawdownSpread(Strategy):
             callback=callback,
             n_tick_forward=_n_tick) if signal else None
 
+
 class MaxDrawdownSuperTrendSpread(Strategy):
     """ Maxdrawdown SuperTrend Spread strategy implementation
         will scout for potential actionable
@@ -856,11 +1167,13 @@ class MaxDrawdownSqueeze(Strategy):
             callback=callback,
             n_tick_forward=_n_tick) if signal else None
 
+
 __REGISTRY = {
     str(StrategyType.SUPER_TREND_SQUEEZE): SuperTrendSqueeze,
     str(StrategyType.MAX_DRAWDOWN_SQUEEZE): MaxDrawdownSqueeze,
     str(StrategyType.MAX_DRAWDOWN_SPREAD): MaxDrawdownSpread,
-    str(StrategyType.MAX_DRAWDOWN_SUPER_TREND_SPREAD): MaxDrawdownSuperTrendSpread
+    str(StrategyType.MAX_DRAWDOWN_SUPER_TREND_SPREAD): MaxDrawdownSuperTrendSpread,
+    str(StrategyType.HEIKIN_ASHI_COINSSPOR): HeikinAshiCoinsspor
 }
 
 def get_strategy(strategy: StrategyType) -> Union[Strategy, None]:

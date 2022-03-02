@@ -10,6 +10,7 @@ from binance.client import Client
 from binance.exceptions import BinanceAPIException
 from unicorn_binance_websocket_api.unicorn_binance_websocket_api_manager import BinanceWebSocketApiManager
 from kaihft.databases import KaiRealtimeDatabase
+import numpy as np
 
 
 class KlineStatus(Enum):
@@ -296,7 +297,7 @@ class BinanceUSDMKlinesPublisher(BaseTickerKlinesPublisher):
             if self.websocket.is_manager_stopping():
                 exit(0)
             # get and remove the oldest entry from the `stream_buffer` stack
-            oldest_stream_data_from_stream_buffer = self.websocket.pop_stream_data_from_stream_buffer()
+            oldest_stream_data_from_stream_buffer = self.websocket.pop_stream_data_from_stream_buffer(mode='LIFO')
             # print the stream data from stream buffer
             if oldest_stream_data_from_stream_buffer is False:
                 time.sleep(0.01)
@@ -305,28 +306,33 @@ class BinanceUSDMKlinesPublisher(BaseTickerKlinesPublisher):
                 if 'data' not in stream:
                     continue
 
-                # format the data from websocket, to make sure all exchanges have the same final format
-                data, closed = self.format_binance_kline_to_dict(stream['data']['k'])
-                symbol = data['symbol'].upper()
-                # if kline is closed change the kline status
-                self.kline_status[symbol] = (KlineStatus.CLOSED
-                                             if closed else KlineStatus.OPEN)
-                # update the dataframe appropriately
-                klines = self.update_klines(symbol, data)
-                base, quote = self.get_base_quote(symbol)
+                else:
+                    # format the data from websocket, to make sure all exchanges have the same final format
+                    data, closed = self.format_binance_kline_to_dict(stream['data']['k'])
+                    symbol = data['symbol'].upper()
+                    # if kline is closed change the kline status
+                    self.kline_status[symbol] = (KlineStatus.CLOSED
+                                                 if closed else KlineStatus.OPEN)
+                    # update the dataframe appropriately
+                    klines = self.update_klines(symbol, data)
+                    base, quote = self.get_base_quote(symbol)
+                    stream_time = stream['data']["E"]
 
-                self.publisher.publish(
-                    origin=self.__class__.__name__,
-                    topic_path=self.topic_path,
-                    data=klines,
-                    attributes=dict(
-                        base=base,
-                        quote=quote,
-                        symbol=symbol))
+                    self.publisher.publish(
+                        origin=self.__class__.__name__,
+                        topic_path=self.topic_path,
+                        data=klines,
+                        attributes=dict(
+                            base=base,
+                            quote=quote,
+                            symbol=symbol,
+                            timestamp=str(stream_time)
+                        ))
 
             count += 1
             if count % self.log_every == 0:
                 logging.info(self.websocket.print_summary(disable_print=True))
+                self.websocket.clear_stream_buffer()
                 count = 0
 
     def update_klines(self, symbol: str, data: dict) -> dict:
@@ -480,7 +486,7 @@ class BinanceUSDMTickerPublisher(BaseTickerKlinesPublisher):
                 raise RestartPodException(f"Websocket manager stopped, last message "
                                           f"published: {round(last_published, 2)} seconds ago, restarting pod!")
             # get and remove the oldest entry from the `stream_buffer` stack
-            oldest_stream_data_from_stream_buffer = self.websocket.pop_stream_data_from_stream_buffer()
+            oldest_stream_data_from_stream_buffer = self.websocket.pop_stream_data_from_stream_buffer(mode='LIFO')
 
             if oldest_stream_data_from_stream_buffer is False:
                 time.sleep(0.01)
@@ -495,11 +501,12 @@ class BinanceUSDMTickerPublisher(BaseTickerKlinesPublisher):
                     data = self.from_mark_price_stream(_data)
                     datas[data["symbol"]] = data
 
+                stream_time = stream['data']["E"]
                 self.publisher.publish(
                     origin=self.__class__.__name__,
                     topic_path=self.topic_path,
                     data=datas,
-                    attributes=dict(timestamp=str(datetime.utcnow())))
+                    attributes=dict(timestamp=str(int(stream_time))))
 
                 # restart the time
                 start = time.time()
