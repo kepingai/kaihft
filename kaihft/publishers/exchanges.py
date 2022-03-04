@@ -853,11 +853,13 @@ class BinanceSpotTickerPublisher(BaseTickerKlinesPublisher):
         """ This function streams the binance spot market for all available tickers
             and publish the data to pub/sub.
             Example of streamer output:
-            {'stream': '!markPrice@arr@1s',
-             'data': [{},
-                      {}]
-            This function will take the output, format it using from_mark_price function, then publish it
-            to our ticker topic.
+            {'stream': '!!miniTicker@arr',
+             'data': [{"e": "24hrMiniTicker", "E": 123456789, "s": "BNBBTC", "c": "0.0025",
+                       "o": "0.0010", "h": "0.0025", "l": "0.0010", "v": "10000",  "q": "18"},
+                      {"e": "24hrMiniTicker", "E": 123456789, "s": "ETHBTC", "c": "0.0025",
+                       "o": "0.0010", "h": "0.0025", "l": "0.0010", "v": "10000",  "q": "18"}]
+            This function will take the output, format it using format_binance_spot_ticker_to_dict function, 
+            then publish it to our ticker topic.
         """
         count = 0
         start = time.time()
@@ -876,18 +878,18 @@ class BinanceSpotTickerPublisher(BaseTickerKlinesPublisher):
                 time.sleep(0.01)
             else:
                 stream = json.loads(oldest_stream_data_from_stream_buffer)
-                datas = {}
 
-                # format data to uniform if the quota is 'USDT'
+                # format data to uniform
                 for data_sample in stream:
                     data = self.format_binance_spot_ticker_to_dict(data_sample)
-                    datas[data["symbol"]] = data
+                    stream_time = data['timestamp']
 
-                self.publisher.publish(
-                    origin=self.__class__.__name__,
-                    topic_path=self.topic_path,
-                    data=datas,
-                    attributes=dict(timestamp=str(datetime.utcnow())))
+                    self.publisher.publish(
+                        origin=self.__class__.__name__,
+                        topic_path=self.topic_path,
+                        data=data,
+                        attributes=dict(timestamp=str(stream_time), 
+                                        symbol=data['symbol']))
 
                 # restart the time
                 start = time.time()
