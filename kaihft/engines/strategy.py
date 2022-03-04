@@ -411,7 +411,9 @@ class HeikinAshiCoinsspor(Strategy):
 
         else:
             cls_prob = cls_result['predictions']
-            if cls_prob[0] > cls_prob[1] and cls_prob[0] > self.classification_threshold:
+            if (
+                    # cls_prob[0] > cls_prob[1] and
+                    cls_prob[0] > self.classification_threshold):
                 _spread = reg_result['predictions']['percentage_spread']
                 _direction = reg_result['predictions']['direction']
                 _n_ticks = reg_result['predictions']['n_tick_forward']

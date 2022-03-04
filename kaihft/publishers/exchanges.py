@@ -495,18 +495,17 @@ class BinanceUSDMTickerPublisher(BaseTickerKlinesPublisher):
                 if 'data' not in stream:
                     continue
 
-                datas = {}
                 # format data to uniform ticker futures
                 for _data in stream['data']:
                     data = self.from_mark_price_stream(_data)
-                    datas[data["symbol"]] = data
+                    stream_time = _data["E"]
 
-                stream_time = stream['data']["E"]
-                self.publisher.publish(
-                    origin=self.__class__.__name__,
-                    topic_path=self.topic_path,
-                    data=datas,
-                    attributes=dict(timestamp=str(int(stream_time))))
+                    self.publisher.publish(
+                        origin=self.__class__.__name__,
+                        topic_path=self.topic_path,
+                        data=data,
+                        attributes=dict(timestamp=str(int(stream_time)),
+                                        symbol=data["symbol"]))
 
                 # restart the time
                 start = time.time()

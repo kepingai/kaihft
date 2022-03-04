@@ -38,9 +38,9 @@ def main(production: bool,
     publisher = KaiPublisherClient()
     # initialize binance usdm ticker publisher
     # and run the publisher.
-    klines_publisher = BinanceUSDMTickerPublisher(
+    ticker_publisher = BinanceUSDMTickerPublisher(
         websocket=binance_websocket_api_manager,
         stream_id=stream_id,
         publisher=publisher,
         topic_path=topic_path,)
-    klines_publisher.run()
+    ticker_publisher.run()

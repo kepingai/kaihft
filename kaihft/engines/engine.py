@@ -152,7 +152,6 @@ class SignalEngine():
                 self.subscribe(ha_subscriber, 'ha_klines', ha_callback),
                 self.listen_thresholds(self._update_thresholds),
                 self.listen_pairs(self._update_pairs),
-                self.listen_max_drawdowns(self._update_max_drawdowns),
                 self.listen_buffers(self._update_buffers)
             )
         else:
@@ -398,15 +397,17 @@ class SignalEngine():
             timestamp = int(message.attributes.get("timestamp"))
             ticker_time = datetime.utcfromtimestamp(timestamp / 1000)
             seconds_passed = (datetime.utcnow() - ticker_time).total_seconds()
-            # only accept data below 1 seconds latency
-            if seconds_passed <= 5 and seconds_passed >= 0:
+            # only accept data below 1.5 seconds latency
+
+            if seconds_passed <= 1.5 and seconds_passed >= 0:
                 if symbol in self.signals and self.signals[symbol].is_open():
                     # retrieve and decode the full data
                     data = json.loads(message.data.decode('utf-8'))['data']
                     # begin update to signal object
-                    last_price = data['last_price']
+                    last_price = float(data['mark_price'])
                     # update signal with the lastest price
                     self.signals[symbol].update(last_price)
+
             if self.ticker_counts % self.log_every == 0:
                 logging.info(f"[ticker] cloud pub/sub messages running, "
                     f"latency: {seconds_passed} sec, last-symbol: {symbol}")
@@ -432,7 +433,7 @@ class SignalEngine():
             klines_time = datetime.utcfromtimestamp(timestamp / 1000)
             seconds_passed = (datetime.utcnow() - klines_time).total_seconds()
             # only accept messages within 1 seconds latency
-            if seconds_passed <= 100 and seconds_passed >= 0:
+            if seconds_passed <= 1.5 and seconds_passed >= 0:
                 # get the symbol of the klines
                 base = message.attributes.get('base')
                 quote = message.attributes.get('quote')
