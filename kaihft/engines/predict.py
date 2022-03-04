@@ -202,7 +202,7 @@ def predict_cloud_run(base: str,
     else:
         direction = None
 
-    if direction is not None and base == 'BTC':
+    if direction is not None:
         cls_endpoint = f"https://{mode}-{kaiforecast_version}---"\
                        f"{base.lower()}-predict-classification-{direction}-{timeframe}-wvgsvdm4ya-uc.a.run.app"
         reg_endpoint = f"https://{mode}-{kaiforecast_version}---"\

@@ -326,7 +326,6 @@ class HeikinAshiCoinsspor(Strategy):
                 kaiforecast_version=self.kaiforecast_version,
                 ha_trend=self.ha_trend)
 
-            print(_spread, _direction, _n_tick, base, quote)
             if _spread is None or _direction is None: return None
             # ensure that spread is above threshold and direction matches.
             if _spread >= self.long_spread and _direction == 1:
@@ -347,7 +346,6 @@ class HeikinAshiCoinsspor(Strategy):
                 ha_trend=self.ha_trend
             )
 
-            print(_spread, _direction, _n_tick, base, quote)
             if _spread is None or _direction is None: return None
             # ensure that spread is above threshold and direction matches.
             if _spread >= self.short_spread and _direction == 1:
