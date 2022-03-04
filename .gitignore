@@ -10,6 +10,9 @@ dist
 *egg-info
 setup.py
 # cache
+__pycache__
+*.idea
 __pycache__/
 tmp
 *.pyc
+*.json

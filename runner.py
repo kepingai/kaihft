@@ -1,4 +1,7 @@
-import click, logging, sys
+import click
+import logging
+import sys
+import json
 import kaihft.services as services
 from kaihft.alerts import notify_failure
 
@@ -27,15 +30,10 @@ def cli():
 
 @cli.command()
 @click.option('--production', is_flag=True, help='publish messages to production topic.')
-@click.option('--exp0a', is_flag=True, help='publish & subscribe messages to exp0a topic.')
-@click.option('--exp1a', is_flag=True, help='publish & subscribe messages to exp1a topic.')
 @notify_failure
-def ticker_binance_spot(production, exp0a, exp1a):
+def ticker_binance_spot(production):
     services.ticker_binance_spot.main(
-        markets=__MARKETS,
-        production=production,
-        exp0a=exp0a,
-        exp1a=exp1a)
+        production=production)
 
 @cli.command()
 @click.option('--production', is_flag=True, help='publish messages to production topic.')
@@ -52,16 +50,13 @@ def ticker_binance_futures(production, exp0a, exp1a):
 @cli.command()
 @click.option('--klines', default=250, help='the length of historical klines back.')
 @click.option('--production', is_flag=True, help='publish messages to production topic.')
-@click.option('--exp0a', is_flag=True, help='publish & subscribe messages to exp0a topic.')
-@click.option('--exp1a', is_flag=True, help='publish & subscribe messages to exp1a topic.')
+@click.option('--timeframe', default=15, help='market timeframe to stream')
 @notify_failure
-def klines_binance_spot(klines, production, exp0a, exp1a):
+def klines_binance_spot(klines, production, timeframe):
     services.klines_binance_spot.main(
         n_klines=klines,
-        markets=__MARKETS,
         production=production,
-        exp0a=exp0a,
-        exp1a=exp1a)
+        timeframe=timeframe)
 
 @cli.command()
 @click.option('--klines', default=250, help='the length of historical klines back.')
@@ -78,6 +73,26 @@ def klines_binance_futures(klines, production, exp0a, exp1a):
         exp1a=exp1a)
 
 @cli.command()
+@click.option('--klines', default=250, help='the length of historical klines back.')
+@click.option('--production', is_flag=True, help='publish messages to production topic.')
+@click.option('--timeframe', default=15, help='market timeframe to stream')
+@notify_failure
+def klines_binance_usdm(klines, production, timeframe):
+    services.klines_binance_usdm.main(
+        n_klines=klines,
+        production=production,
+        timeframe=timeframe)
+
+
+@cli.command()
+@click.option('--production', is_flag=True, help='publish messages to production topic.')
+@notify_failure
+def ticker_binance_usdm(production):
+    services.ticker_binance_usdm.main(
+        production=production)
+
+
+@cli.command()
 @click.option('--strategy', default="SUPER_TREND_SQUEEZE", help="Available strategies: [SUPERTREND_SQUEEZE, MAX_DRAWDOWN_SQUEEZE, MAX_DRAWDOWN_SPREAD, MAX_DRAWDOWN_SUPER_TREND_SPREAD]")
 @click.option('--version', default='v0', help="The version of signal engine.")
 @click.option('--log-every', default=1000, help="Log cloud pub/sub messages every.")
@@ -85,9 +100,16 @@ def klines_binance_futures(klines, production, exp0a, exp1a):
 @click.option('--production', is_flag=True, help='Publish & subscribe messages to production topic.')
 @click.option('--exp0a', is_flag=True, help='Publish & subscribe messages to exp0a topic.')
 @click.option('--exp1a', is_flag=True, help='Publish & subscribe messages to exp1a topic.')
+@click.option('--strategy-params-path', default='', help='The path to json file which contains the params for the strategy')
 @notify_failure
-def signal_binance_futures(strategy, version, log_every, log_metrics_every, 
-    production, exp0a, exp1a):
+def signal_binance_futures(strategy, version, log_every, log_metrics_every,
+                           production, strategy_params_path, exp0a, exp1a):
+    if strategy_params_path == '':
+        strategy_params = {}
+    else:
+        with open(strategy_params_path, 'r') as fp:
+            strategy_params = json.load(fp)
+
     services.signal_engine.main(
         exchange='binance',
         strategy=strategy,
@@ -96,7 +118,9 @@ def signal_binance_futures(strategy, version, log_every, log_metrics_every,
         exp1a=exp1a,
         version=version,
         log_every=log_every,
-        log_metrics_every=log_metrics_every)
+        log_metrics_every=log_metrics_every,
+        strategy_params=strategy_params)
+
 
 if __name__ == "__main__":
     cli()

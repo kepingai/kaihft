@@ -1,5 +1,5 @@
 import logging
-from kaihft.publishers.exchanges import BinanceSpotTickerPublisher
+from kaihft.publishers.exchanges import BinanceUSDMTickerPublisher
 from kaihft.publishers.client import KaiPublisherClient
 from unicorn_binance_websocket_api.unicorn_binance_websocket_api_manager import BinanceWebSocketApiManager
 
@@ -18,19 +18,19 @@ def main(production: bool,
     """
     if production:
         topic_path = f"prod-{topic_path}"
-        logging.warn(f"[production-mode] klines: markPrice-BINANCE-SPOT, "
-                     f"markets: All binance spot pairs, topic: prod-{topic_path}")
+        logging.warn(f"[production-mode] klines: markPrice-BINANCE-USDM, "
+                     f"markets: All binance usdm pairs, topic: prod-{topic_path}")
     else:
         topic_path = f'dev-{topic_path}'
 
     # connect to binance.com and create the stream.
     # the stream id is returned after calling `create_stream()`
     binance_websocket_api_manager = BinanceWebSocketApiManager(
-        exchange="binance.com",
+        exchange="binance.com-futures",
         throw_exception_if_unrepairable=True)
     # use this value of channels and markets to get the current mark price of all tickers
-    channels = ["!miniTicker"]
-    markets = ["arr"]
+    channels = ["!markPrice"]
+    markets = "arr@1s"
     stream_id = binance_websocket_api_manager.create_stream(
         channels=channels,
         markets=markets)
@@ -38,9 +38,9 @@ def main(production: bool,
     publisher = KaiPublisherClient()
     # initialize binance usdm ticker publisher
     # and run the publisher.
-    klines_publisher = BinanceSpotTickerPublisher(
+    ticker_publisher = BinanceUSDMTickerPublisher(
         websocket=binance_websocket_api_manager,
         stream_id=stream_id,
         publisher=publisher,
         topic_path=topic_path,)
-    klines_publisher.run()
+    ticker_publisher.run()

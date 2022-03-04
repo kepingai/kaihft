@@ -2,7 +2,6 @@ import pandas as pd
 import numpy as np
 import logging, json, asyncio
 from datetime import datetime, timedelta
-from typing import Union
 from google.cloud import pubsub_v1
 from kaihft.databases import KaiRealtimeDatabase
 from kaihft.publishers.client import KaiPublisherClient
@@ -10,6 +9,7 @@ from kaihft.subscribers.client import KaiSubscriberClient
 from kaihft.alerts.exceptions import RestartPodException
 from .strategy import StrategyType, get_strategy, Strategy
 from .signal import SignalStatus, init_signal_from_rtd, Signal
+
 
 class SignalEngine():
     """ The layer-1 system of KepingAI Signal LSTF. All communication between
@@ -32,7 +32,8 @@ class SignalEngine():
         log_every: int,
         log_metrics_every: int,
         strategy: StrategyType = StrategyType.SUPER_TREND_SQUEEZE,
-        endpoint: str = 'predict_15m'):
+        endpoint: str = 'predict_15m',
+        strategy_params: dict = {}):
         """ Will initialize the signal engine
             to scout for potential actionable intelligence
             from ticker, klines data subscriber. This signal
@@ -73,6 +74,7 @@ class SignalEngine():
                 The strategy to run, default to STS.
             endpoint: `str`
                 The end point for layer 2 connection.
+            strategy_params: `dict`
 
             Example
             -------
@@ -116,7 +118,8 @@ class SignalEngine():
         self.listener_pairs = None
         self.listener_max_drawdowns = None
         self.endpoint = endpoint
-        self.strategy = self._get_strategy(strategy, self.thresholds)
+        self.strategy = self._get_strategy(strategy, self.thresholds, strategy_params)
+        self.strategy_params = strategy_params
     
     def run(self):
         """ Will run signal engine concurrently, 
@@ -140,14 +143,27 @@ class SignalEngine():
             and begin the signal engine on scouting and monitoring
             ongoing signals concurrently.
         """
-        await asyncio.gather(
-            self.subscribe(self.ticker_subscriber, 'ticker', self.update_signals),
-            self.subscribe(self.klines_subscriber, 'klines', self.scout_signals),
-            self.listen_thresholds(self._update_thresholds),
-            self.listen_pairs(self._update_pairs),
-            self.listen_max_drawdowns(self._update_max_drawdowns),
-            self.listen_buffers(self._update_buffers)
-        )
+        if self.strategy_type == 'HEIKIN_ASHI_COINSSPOR':
+            ha_subscriber = self.strategy_params['heikin_ashi_subscriber']
+            ha_callback = self.strategy.calculate_heikin_ashi_trend
+            await asyncio.gather(
+                self.subscribe(self.ticker_subscriber, 'ticker', self.update_signals),
+                self.subscribe(self.klines_subscriber, 'klines', self.scout_signals),
+                self.subscribe(ha_subscriber, 'ha_klines', ha_callback),
+                self.listen_thresholds(self._update_thresholds),
+                self.listen_pairs(self._update_pairs),
+                self.listen_buffers(self._update_buffers)
+            )
+        else:
+            await asyncio.gather(
+                self.subscribe(self.ticker_subscriber, 'ticker', self.update_signals),
+                self.subscribe(self.klines_subscriber, 'klines', self.scout_signals),
+                self.listen_thresholds(self._update_thresholds),
+                self.listen_pairs(self._update_pairs),
+                self.listen_max_drawdowns(self._update_max_drawdowns),
+                self.listen_buffers(self._update_buffers)
+            )
+
         with self.ticker_subscriber.client, self.klines_subscriber.client:
             try:
                 # When `timeout` is not set, result() will block indefinitely,
@@ -381,15 +397,17 @@ class SignalEngine():
             timestamp = int(message.attributes.get("timestamp"))
             ticker_time = datetime.utcfromtimestamp(timestamp / 1000)
             seconds_passed = (datetime.utcnow() - ticker_time).total_seconds()
-            # only accept data below 1 seconds latency
-            if seconds_passed <= 1 and seconds_passed >= 0:
+            # only accept data below 1.5 seconds latency
+
+            if seconds_passed <= 1.5 and seconds_passed >= 0:
                 if symbol in self.signals and self.signals[symbol].is_open():
                     # retrieve and decode the full data
                     data = json.loads(message.data.decode('utf-8'))['data']
                     # begin update to signal object
-                    last_price = data['last_price']
+                    last_price = float(data['mark_price'])
                     # update signal with the lastest price
                     self.signals[symbol].update(last_price)
+
             if self.ticker_counts % self.log_every == 0:
                 logging.info(f"[ticker] cloud pub/sub messages running, "
                     f"latency: {seconds_passed} sec, last-symbol: {symbol}")
@@ -415,7 +433,7 @@ class SignalEngine():
             klines_time = datetime.utcfromtimestamp(timestamp / 1000)
             seconds_passed = (datetime.utcnow() - klines_time).total_seconds()
             # only accept messages within 1 seconds latency
-            if seconds_passed <= 1 and seconds_passed >= 0:
+            if seconds_passed <= 1.5 and seconds_passed >= 0:
                 # get the symbol of the klines
                 base = message.attributes.get('base')
                 quote = message.attributes.get('quote')
@@ -481,9 +499,10 @@ class SignalEngine():
             # this will help layer2's ability for 
             # predicting stationaire market prices
             symbol = f"{base}{quote}".upper()
+
             if (self.is_valid_volatility(dataframe) 
-                and self.is_valid_cooldown(symbol)
-                and symbol not in self.signals): 
+                    and self.is_valid_cooldown(symbol)
+                    and symbol not in self.signals):
                 # run technical analysis & inference to layer 2,
                 # await for futures before the remaining tasks.
                 signal = self.strategy.scout(
@@ -491,6 +510,7 @@ class SignalEngine():
                     quote=quote,
                     dataframe=dataframe, 
                     callback=self.close_signal)
+
                 # if signal is triggered
                 if signal: 
                     # save the signal to class attrs
@@ -831,7 +851,10 @@ class SignalEngine():
         short = [pair.upper() for pair in pairs['short']]
         return dict(long=long, short=short)
         
-    def _get_strategy(self, strategy: str, thresholds: dict) -> Strategy:
+    def _get_strategy(self,
+                      strategy: str,
+                      thresholds: dict,
+                      strategy_params: dict) -> Strategy:
         """ Will return the strategy chosen.
 
             Parameters
@@ -840,6 +863,8 @@ class SignalEngine():
                 The strategy to run.
             thresholds: `dict`
                 A dictionary containing long & short thresholds
+            strategy_params: `dict`
+
 
             Returns
             -------
@@ -885,5 +910,21 @@ class SignalEngine():
                 pairs=self.pairs,
                 log_every=self.log_metrics_every,
                 buffer=self.buffers['inference'])
+
+        elif self.strategy_type == StrategyType.HEIKIN_ASHI_COINSSPOR:
+            return strategy_class(
+                long_spread=thresholds['long']['bet_threshold'],
+                long_ttp=thresholds['long']['ttp_threshold'],
+                short_spread=thresholds['short']['bet_threshold'],
+                short_ttp=thresholds['short']['ttp_threshold'],
+                mode=strategy_params['mode'],
+                kaiforecast_version=strategy_params['kaiforecast_version'],
+                classification_threshold=strategy_params['classification_threshold'],
+                ha_timeframe=strategy_params['ha_timeframe'],
+                model_timeframe=strategy_params['timeframe'],
+                ha_ema_len=strategy_params['ha_ema_len'],
+                pairs=self.pairs,
+                log_every=self.log_metrics_every)
+
         else:
             raise ValueError(f"[strategy] strategy type: {self.strategy_type} not valid!")

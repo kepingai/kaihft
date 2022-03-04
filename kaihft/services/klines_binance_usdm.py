@@ -1,5 +1,5 @@
 import logging
-from kaihft.publishers.exchanges import BinanceSpotKlinesPublisher
+from kaihft.publishers.exchanges import BinanceUSDMKlinesPublisher
 from kaihft.publishers.client import KaiPublisherClient
 from binance.client import Client
 from unicorn_binance_websocket_api.unicorn_binance_websocket_api_manager import BinanceWebSocketApiManager
@@ -29,9 +29,11 @@ def main(
     # we stream mark price and all market pairs
     if timeframe < 60:
         channels = [f"kline_{timeframe}m"]
+        topic_path = f"{topic_path}-{timeframe}m"
     else:
         n_hour = timeframe / 60
         channels = [f"kline_{n_hour}h"]
+        topic_path = f"{topic_path}-{n_hour}h"
 
     # get the list of tickers for inference
     database = KaiRealtimeDatabase()
@@ -41,13 +43,14 @@ def main(
         markets_long_short = database.get(pairs_ref)
         markets = list(set().union(markets_long_short['long'], markets_long_short['short']))
         topic_path = f"prod-{topic_path}"
-        logging.warn(f"[production-mode] klines: {n_klines}-BINANCE-SPOT, "
+        logging.warn(f"[production-mode] klines: {n_klines}-BINANCE-USDM, "
                      f"markets: {markets}, topic: prod-{topic_path}")
     else:
         pairs_ref = 'dev/pairs'
         markets_long_short = database.get(pairs_ref)
-        markets = list(set().union(markets_long_short['long'], markets_long_short['short']))
+        # markets = list(set().union(markets_long_short['long'], markets_long_short['short']))
         topic_path = f'dev-{topic_path}'
+        markets = ['BTCUSDT']
         print('list of markets: ', markets)
     # binance only allows 1024 subscriptions in one stream
     # channels and markets and initiate multiplex stream
@@ -56,7 +59,7 @@ def main(
     # connect to binance.com and create the stream
     # the stream id is returned after calling `create_stream()`
     binance_websocket_api_manager = BinanceWebSocketApiManager(
-        exchange="binance.com",
+        exchange="binance.com-futures",
         throw_exception_if_unrepairable=True)
     stream_id = binance_websocket_api_manager.create_stream(
         channels=channels,
@@ -65,7 +68,7 @@ def main(
     publisher = KaiPublisherClient()
     # initialize binance klines publisher
     # and run the publisher.
-    klines_publisher = BinanceSpotKlinesPublisher(
+    klines_publisher = BinanceUSDMKlinesPublisher(
         client=Client("", ""),
         websocket=binance_websocket_api_manager,
         markets=markets,
@@ -77,3 +80,4 @@ def main(
         database=database,
         pairs_ref=pairs_ref)
     klines_publisher.run()
+
