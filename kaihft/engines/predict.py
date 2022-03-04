@@ -188,7 +188,7 @@ def predict_cloud_run(base: str,
         >>> {
         ...        'base': 'UNI',                               # base pair
         ...        'interval': '15m',                           # interval timeframe
-        ...        'predictions': [0.6, 0.4],                   # prediction output
+        ...        'predictions': [0.6, 0.4],                   # prediction probability
         ...        'quote': 'USDT',                             # quote pair
         ...        'success': True,                             # validator
         ...        'timestamp': 1639512483.083822               # utc timestamp
