@@ -122,5 +122,11 @@ def signal_binance_futures(strategy, version, log_every, log_metrics_every,
         strategy_params=strategy_params)
 
 
+@cli.command()
+@click.option('--ideal-base', default='BTC', help="The base to calculate ideal price.")
+def arbitrage(ideal_base):
+    services.arbitrage.main(ideal_base=ideal_base)
+
+
 if __name__ == "__main__":
     cli()
