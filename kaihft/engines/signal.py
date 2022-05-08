@@ -93,7 +93,7 @@ class Signal():
         self.realized_profit = realized_profit
         self.created_at = datetime.utcnow().timestamp() if not created_at else created_at
         self.expired_at = ((datetime.fromtimestamp(self.created_at) + timedelta(
-            minutes=(15 * (n_tick_forward + buffer)))).timestamp()
+            minutes=(45 * (n_tick_forward + buffer)))).timestamp()
             if not expired_at else expired_at)
         logging.info(f"[signal] created! symbol:{self.symbol}, "
             f"spread: {self.spread}, ttp: {self.take_profit}, direction: {self.direction}")
