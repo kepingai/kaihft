@@ -4,12 +4,17 @@ import sys
 import json
 import kaihft.services as services
 from kaihft.alerts import notify_failure
+from google.cloud import pubsub_v1
+from google.api_core import bidi
 
 # logging verbose mode
 logging.basicConfig(
     level=logging.INFO,       
     format="{asctime} [{levelname:8}] {process} {thread} {module}: {message}",       
     style="{", handlers=[logging.StreamHandler(sys.stdout)])
+# only print pubsub_v1 and bidi logging with at least WARNING level
+logging.getLogger(pubsub_v1.__name__).setLevel(logging.WARNING)
+logging.getLogger(bidi.__name__).setLevel(logging.WARNING)
 
 __MARKETS = {
     '1inchusdt','aaveusdt', 'adausdt', 'algousdt', 'atomusdt', 

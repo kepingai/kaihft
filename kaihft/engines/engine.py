@@ -404,7 +404,8 @@ class SignalEngine():
                     # retrieve and decode the full data
                     data = json.loads(message.data.decode('utf-8'))['data']
                     # begin update to signal object
-                    last_price = float(data['mark_price'])
+                    price_type = 'mark_price' if 'mark_price' in data else 'last_price'
+                    last_price = float(data[price_type]) 
                     # update signal with the lastest price
                     self.signals[symbol].update(last_price)
 
