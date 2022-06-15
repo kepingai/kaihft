@@ -143,7 +143,7 @@ class SignalEngine():
             and begin the signal engine on scouting and monitoring
             ongoing signals concurrently.
         """
-        if self.strategy_type == 'HEIKIN_ASHI_COINSSPOR':
+        if self.strategy_type == 'HEIKIN_ASHI_HYBRID':
             ha_subscriber = self.strategy_params['heikin_ashi_subscriber']
             ha_callback = self.strategy.calculate_heikin_ashi_trend
             await asyncio.gather(
@@ -912,7 +912,7 @@ class SignalEngine():
                 log_every=self.log_metrics_every,
                 buffer=self.buffers['inference'])
 
-        elif self.strategy_type == StrategyType.HEIKIN_ASHI_COINSSPOR:
+        elif self.strategy_type == StrategyType.HEIKIN_ASHI_HYBRID:
             return strategy_class(
                 long_spread=thresholds['long']['bet_threshold'],
                 long_ttp=thresholds['long']['ttp_threshold'],

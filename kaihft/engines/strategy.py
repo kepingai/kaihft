@@ -21,7 +21,8 @@ class StrategyType(Enum):
     MAX_DRAWDOWN_SQUEEZE = "MAX_DRAWDOWN_SQUEEZE"
     MAX_DRAWDOWN_SPREAD = "MAX_DRAWDOWN_SPREAD"
     MAX_DRAWDOWN_SUPER_TREND_SPREAD = "MAX_DRAWDOWN_SUPER_TREND_SPREAD"
-    HEIKIN_ASHI_COINSSPOR = "HEIKIN_ASHI_COINSSPOR"
+    HEIKIN_ASHI_HYBRID = "HEIKIN_ASHI_HYBRID"
+    HEIKIN_ASHI_REGRESSION = "HEIKIN_ASHI_REGRESSION"
 
     def __str__(self):
         """ Convert the enum object to string. 
@@ -236,8 +237,8 @@ class Strategy():
         return False
 
 
-class HeikinAshiCoinsspor(Strategy):
-    """ Heikin Ashi Coinsspor strategy implementation
+class HeikinAshiHybrid(Strategy):
+    """ Heikin Ashi Hybrid strategy implementation
         will scout for potential actionable
         intelligence based on a specific market behavior.
     """
@@ -255,9 +256,9 @@ class HeikinAshiCoinsspor(Strategy):
                  ha_ema_len: int,
                  log_every: int):
 
-        super(HeikinAshiCoinsspor, self).__init__(
-            name=str(StrategyType.HEIKIN_ASHI_COINSSPOR),
-            strategy=StrategyType.HEIKIN_ASHI_COINSSPOR,
+        super(HeikinAshiHybrid, self).__init__(
+            name=str(StrategyType.HEIKIN_ASHI_HYBRID),
+            strategy=StrategyType.HEIKIN_ASHI_HYBRID,
             description="Heikin-Ashi Buy and Sell Strategy by Coinsspor",
             endpoint='',
             long_spread=long_spread,
@@ -705,6 +706,7 @@ class SuperTrendSqueeze(Strategy):
             callback=callback,
             n_tick_forward=_n_tick) if signal else None
 
+
 class MaxDrawdownSpread(Strategy):
     """ Maxdrawdown Spread strategy implementation
         will scout for potential actionable
@@ -1026,6 +1028,7 @@ class MaxDrawdownSuperTrendSpread(Strategy):
             callback=callback,
             n_tick_forward=_n_tick) if signal else None
 
+
 class MaxDrawdownSqueeze(Strategy):
     """ Maxdrawdown Squeeze strategy implementation
         will scout for potential actionable
@@ -1173,8 +1176,9 @@ __REGISTRY = {
     str(StrategyType.MAX_DRAWDOWN_SQUEEZE): MaxDrawdownSqueeze,
     str(StrategyType.MAX_DRAWDOWN_SPREAD): MaxDrawdownSpread,
     str(StrategyType.MAX_DRAWDOWN_SUPER_TREND_SPREAD): MaxDrawdownSuperTrendSpread,
-    str(StrategyType.HEIKIN_ASHI_COINSSPOR): HeikinAshiCoinsspor
+    str(StrategyType.HEIKIN_ASHI_HYBRID): HeikinAshiHybrid
 }
+
 
 def get_strategy(strategy: StrategyType) -> Union[Strategy, None]:
     """ A helper function that will retrieve the strategy class from `string_id` 

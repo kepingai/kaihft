@@ -70,7 +70,7 @@ def main(exchange: str,
         "ticker": dict(id=ticker_topic_path, timeout=timeout),
         "klines": dict(id=klines_topic_path, timeout=timeout)}
 
-    if strategy == 'HEIKIN_ASHI_COINSSPOR':
+    if strategy == 'HEIKIN_ASHI_HYBRID':
         heikin_ashi_topic_path = f'{path}-klines-{exchange}-{version}-{strategy_params["ha_timeframe"]}-sub'
         heikin_ashi_subscriber = KaiSubscriberClient()
         params.update({"ha_klines": dict(id=heikin_ashi_topic_path, timeout=timeout)})
