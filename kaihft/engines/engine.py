@@ -143,7 +143,7 @@ class SignalEngine():
             and begin the signal engine on scouting and monitoring
             ongoing signals concurrently.
         """
-        if self.strategy_type == 'HEIKIN_ASHI_HYBRID':
+        if 'HEIKIN_ASHI' in (self.strategy_type):
             ha_subscriber = self.strategy_params['heikin_ashi_subscriber']
             ha_callback = self.strategy.calculate_heikin_ashi_trend
             await asyncio.gather(
@@ -886,7 +886,8 @@ class SignalEngine():
                 short_spread=thresholds['short']['bet_threshold'],
                 short_ttp=thresholds['short']['ttp_threshold'],
                 pairs=self.pairs,
-                log_every=self.log_metrics_every)
+                log_every=self.log_metrics_every
+            )
         elif self.strategy_type == StrategyType.MAX_DRAWDOWN_SQUEEZE:
             return strategy_class(
                 endpoint=self.endpoint,
@@ -897,7 +898,8 @@ class SignalEngine():
                 short_ttp=thresholds['short']['ttp_threshold'],
                 short_max_drawdown=self.max_drawdowns['short'],
                 pairs=self.pairs,
-                log_every=self.log_metrics_every)
+                log_every=self.log_metrics_every
+            )
         elif (self.strategy_type == StrategyType.MAX_DRAWDOWN_SPREAD or 
               self.strategy_type == StrategyType.MAX_DRAWDOWN_SUPER_TREND_SPREAD):
             return strategy_class(
@@ -910,22 +912,38 @@ class SignalEngine():
                 short_max_drawdown=self.max_drawdowns['short'],
                 pairs=self.pairs,
                 log_every=self.log_metrics_every,
-                buffer=self.buffers['inference'])
-
+                buffer=self.buffers['inference']
+            )
         elif self.strategy_type == StrategyType.HEIKIN_ASHI_HYBRID:
             return strategy_class(
-                long_spread=thresholds['long']['bet_threshold'],
-                long_ttp=thresholds['long']['ttp_threshold'],
-                short_spread=thresholds['short']['bet_threshold'],
-                short_ttp=thresholds['short']['ttp_threshold'],
                 mode=strategy_params['mode'],
                 kaiforecast_version=strategy_params['kaiforecast_version'],
-                classification_threshold=strategy_params['classification_threshold'],
+                classification_threshold=strategy_params[
+                    'classification_threshold'],
+                long_spread=thresholds['long']['bet_threshold'],
+                short_spread=thresholds['short']['bet_threshold'],
+                long_ttp=thresholds['long']['ttp_threshold'],
+                short_ttp=thresholds['short']['ttp_threshold'],
+                pairs=self.pairs,
                 ha_timeframe=strategy_params['ha_timeframe'],
                 model_timeframe=strategy_params['timeframe'],
                 ha_ema_len=strategy_params['ha_ema_len'],
+                log_every=self.log_metrics_every
+            )
+        elif self.strategy_type == StrategyType.HEIKIN_ASHI_REGRESSION:
+            return strategy_class(
+                mode=strategy_params['mode'],
+                kaiforecast_version=strategy_params['kaiforecast_version'],
+                long_spread=thresholds['long']['bet_threshold'],
+                short_spread=thresholds['short']['bet_threshold'],
+                long_ttp=thresholds['long']['ttp_threshold'],
+                short_ttp=thresholds['short']['ttp_threshold'],
                 pairs=self.pairs,
-                log_every=self.log_metrics_every)
-
+                ha_timeframe=strategy_params['ha_timeframe'],
+                model_timeframe=strategy_params['timeframe'],
+                ha_ema_len=strategy_params['ha_ema_len'],
+                log_every=self.log_metrics_every,
+                endpoint=self.endpoint
+            )
         else:
             raise ValueError(f"[strategy] strategy type: {self.strategy_type} not valid!")
