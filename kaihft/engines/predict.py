@@ -61,7 +61,7 @@ def predict(endpoint: str, base: str, quote: str, data: dict) -> Union[dict, Non
         >>> [
         ...    'open', 'high', 'low', 'close', 'volume', 'close_time',
         ...    'quote_asset_volume','number_of_trades','taker_buy_asset_vol',
-        ...    'taker_buy_quote_vol','datetime','ticker','interval', 'timeframe
+        ...    'taker_buy_quote_vol','datetime','ticker','interval', 'timeframe'
         ... ]
             
         `data` should be formatted as follows
@@ -196,6 +196,7 @@ def predict_cloud_run(base: str,
         ...    }
 
     """
+    _kaiforecast_version = kaiforecast_version.replace(".", "-")
     if ha_trend == 1:
         direction = 'long'
     elif ha_trend == -1:
@@ -204,9 +205,9 @@ def predict_cloud_run(base: str,
         direction = None
 
     if direction is not None:
-        cls_endpoint = f"https://{mode}-{kaiforecast_version}---"\
+        cls_endpoint = f"https://{mode}-{_kaiforecast_version}---"\
                        f"{base.lower()}-predict-classification-{direction}-{timeframe}-wvgsvdm4ya-uc.a.run.app"
-        reg_endpoint = f"https://{mode}-{kaiforecast_version}---"\
+        reg_endpoint = f"https://{mode}-{_kaiforecast_version}---"\
                        f"{base.lower()}-predict-regression-{timeframe}-wvgsvdm4ya-uc.a.run.app"
 
         # inference regression
@@ -300,6 +301,7 @@ def predict_cloud_run_regression(base: str,
         ...        'timestamp': 1639512483.083822               # utc timestamp
         ...    }
     """
+    _kaiforecast_version = kaiforecast_version.replace(".", "-")
     if ha_trend == 1:
         direction = 'long'
     elif ha_trend == -1:
@@ -308,8 +310,9 @@ def predict_cloud_run_regression(base: str,
         direction = None
 
     if direction is not None:
-        reg_endpoint = f"https://{mode}-{kaiforecast_version}---"\
-                       f"{base.lower()}-predict-regression-{timeframe}-wvgsvdm4ya-uc.a.run.app"
+        reg_endpoint = f"https://{mode}-{_kaiforecast_version}---" \
+                       f"{base.lower()}-predict-regression-{timeframe}-" \
+                       f"wvgsvdm4ya-uc.a.run.app"
 
         # inference regression
         # id_token = fetch_id_token(audience=reg_endpoint)
