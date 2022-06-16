@@ -32,7 +32,7 @@ class SignalEngine():
         log_every: int,
         log_metrics_every: int,
         strategy: StrategyType = StrategyType.SUPER_TREND_SQUEEZE,
-        endpoint: str = 'predict_15m',
+        endpoint: str = '',
         strategy_params: dict = {}):
         """ Will initialize the signal engine
             to scout for potential actionable intelligence
