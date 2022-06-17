@@ -569,10 +569,12 @@ class HeikinAshiRegression(HeikinAshiBase):
             if not reg_result: return None, None, None, base, quote
             pred = reg_result['predictions']
 
-            # TODO: use the MAX_DRAWDOWN (or SUPER_TREND_SQUEEZE) strategy?
-            if 'percentage_arr' not in pred: return None, None, None, base, quote
-            _spread, _direction = self.select_direction(pred['percentage_arr'])
-            _n_ticks = pred['n_tick_forward']
+            # use the SUPER_TREND_SQUEEZE method
+            #if 'percentage_arr' not in pred: return None, None, None, base, quote
+            #_spread, _direction = self.select_direction(pred['percentage_arr'])
+            _spread = float(pred['percentage_spread'])
+            _direction = int(pred['direction'])
+            _n_ticks = int(pred['n_tick_forward'])
         else:  # use the cloud run predictor (latest/dev model)
             reg_result = predict_cloud_run_regression(
                 mode=mode,
