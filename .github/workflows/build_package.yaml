@@ -1,0 +1,67 @@
+name: KepingAI HFT Artifact Registry CI
+
+# Controls when the workflow will run
+on:
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  build_and_upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v3
+        with:
+          python-version: '3.7'
+      - uses: actions-hub/gcloud@master
+        env:
+          PROJECT_ID: keping-ai-continuum
+          APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
+
+      - name: Cache Dist Directory
+        uses: actions/cache@v2
+        with:
+          path: dist
+          key: ${{ runner.os }}-dist
+
+      - name: Cache Secret Credentials
+        uses: actions/cache@v2
+        with:
+          path: credentials.json
+          key: ${{ runner.os }}-credentials
+
+      - name: Create Credentials File
+        run: 'echo "$GOOGLE_APPLICATION_CREDENTIALS" > credentials.json'
+        shell: bash
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
+
+      - name: Packagify the repository
+        run: |
+          if [ -d "dist/" ]; then if [ "$(ls dist/)" ]; then rm -Rf dist/*; fi; fi
+          pip3 install -U setuptools wheel
+          python3 setup.py sdist bdist_wheel --dist-dir dist
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v0
+        with:
+          credentials_json: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
+
+      - name: Setup Keyring
+        run: |
+          pip install keyring
+          pip install keyrings.google-artifactregistry-auth
+          keyring --list-backends
+          gcloud auth activate-service-account --key-file credentials.json
+          gcloud artifacts print-settings python \
+          --project=keping-ai-continuum \
+          --repository=kaihft \
+          --location=us-central1
+
+      - name: Upload to Artifact Registry
+        run: |
+          pip install twine
+          twine upload --repository-url https://us-central1-python.pkg.dev/keping-ai-continuum/kaihft/ dist/*
