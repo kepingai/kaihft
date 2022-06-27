@@ -30,7 +30,7 @@ def main(
     if timeframe < 60:
         channels = [f"kline_{timeframe}m"]
     else:
-        n_hour = timeframe / 60
+        n_hour = int(timeframe / 60)
         channels = [f"kline_{n_hour}h"]
 
     # get the list of tickers for inference
@@ -49,6 +49,7 @@ def main(
         markets = list(set().union(markets_long_short['long'], markets_long_short['short']))
         topic_path = f'dev-{topic_path}'
         print('list of markets: ', markets)
+    logging.info(f"[binance] [{channels[0]}] topic path: '{topic_path}'")
     # binance only allows 1024 subscriptions in one stream
     # channels and markets and initiate multiplex stream
     # channels x markets = (total subscription)

@@ -31,7 +31,7 @@ def main(
         channels = [f"kline_{timeframe}m"]
         topic_path = f"{topic_path}-{timeframe}m"
     else:
-        n_hour = timeframe / 60
+        n_hour = int(timeframe / 60)
         channels = [f"kline_{n_hour}h"]
         topic_path = f"{topic_path}-{n_hour}h"
 
@@ -52,6 +52,7 @@ def main(
         topic_path = f'dev-{topic_path}'
         markets = ['BTCUSDT']
         print('list of markets: ', markets)
+    logging.info(f"[binance-usdm] [{channels[0]}] topic path: '{topic_path}'")
     # binance only allows 1024 subscriptions in one stream
     # channels and markets and initiate multiplex stream
     # channels x markets = (total subscription)
