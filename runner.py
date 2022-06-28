@@ -106,7 +106,7 @@ def ticker_binance_usdm(production):
 @click.option('--exp0a', is_flag=True, help='Publish & subscribe messages to exp0a topic.')
 @click.option('--exp1a', is_flag=True, help='Publish & subscribe messages to exp1a topic.')
 @click.option('--strategy-params-path', default='', help='The path to json file which contains the params for the strategy')
-@notify_failure
+#@notify_failure
 def signal_binance_futures(strategy, version, log_every, log_metrics_every,
                            production, strategy_params_path, exp0a, exp1a):
     if strategy_params_path == '':
@@ -128,4 +128,6 @@ def signal_binance_futures(strategy, version, log_every, log_metrics_every,
 
 
 if __name__ == "__main__":
+    import os
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "credentials.json"
     cli()
