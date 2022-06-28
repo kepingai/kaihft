@@ -37,22 +37,15 @@ def main(
 
     # get the list of tickers for inference
     database = KaiRealtimeDatabase()
+    mode = "prod" if production else "dev"
+    pairs_ref = f"{mode}/pairs"
+    logging.info(f"[{mode}-mode] [{channels[0]}] pairs db reference: {pairs_ref}")
 
-    if production:
-        pairs_ref = 'prod/pairs'
-        markets_long_short = database.get(pairs_ref)
-        markets = list(set().union(markets_long_short['long'], markets_long_short['short']))
-        topic_path = f"prod-{topic_path}"
-        logging.warn(f"[production-mode] klines: {n_klines}-BINANCE-USDM, "
-                     f"markets: {markets}, topic: prod-{topic_path}")
-    else:
-        pairs_ref = 'dev/pairs'
-        markets_long_short = database.get(pairs_ref)
-        # markets = list(set().union(markets_long_short['long'], markets_long_short['short']))
-        topic_path = f'dev-{topic_path}'
-        markets = ['BTCUSDT']
-        print('list of markets: ', markets)
-    logging.info(f"[binance-usdm] [{channels[0]}] topic path: '{topic_path}'")
+    markets_long_short = database.get(pairs_ref)
+    markets = list(set().union(markets_long_short['long'], markets_long_short['short']))
+    topic_path = f"{mode}-{topic_path}"
+    logging.info(f"[{mode}-mode] {channels[0]}: {n_klines}-BINANCE-USDM, "
+                 f"topic: {topic_path}, markets: {markets}")
     # binance only allows 1024 subscriptions in one stream
     # channels and markets and initiate multiplex stream
     # channels x markets = (total subscription)
@@ -81,4 +74,3 @@ def main(
         database=database,
         pairs_ref=pairs_ref)
     klines_publisher.run()
-
