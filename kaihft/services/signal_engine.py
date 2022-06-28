@@ -61,8 +61,8 @@ def main(exchange: str,
     max_drawdowns_ref = f"{path}/max_drawdowns"
     buffers_ref = f"{path}/buffers"
     pairs_ref = f"{path}/pairs"
-    logging.warn(f"[{mode}-mode] strategy: BINANCE-FUTURES-{strategy}"
-        f"paths: ticker: {ticker_topic_path}, klines: {klines_topic_path},"
+    logging.warn(f"[{mode}-mode] strategy: BINANCE-FUTURES-{strategy}. [paths] "
+        f"--- ticker: {ticker_topic_path}, klines: {klines_topic_path},"
         f"distribute: {dist_topic_path}, archive: {archive_topic_path}, "
         f"layer 2 endpoint: {endpoint}")
     # initialize signal engine class and run it
