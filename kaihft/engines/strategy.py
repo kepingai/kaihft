@@ -5,7 +5,7 @@ import numpy as np
 import numexpr as ne
 import pandas_ta as ta
 from enum import Enum
-from typing import Union, Tuple
+from typing import Union, Tuple, Optional
 from .signal import Signal
 from .predict import predict, predict_cloud_run, predict_cloud_run_regression
 from datetime import datetime, timedelta
@@ -251,7 +251,7 @@ class HeikinAshiBase(Strategy):
                  name: str,
                  strategy: StrategyType,
                  mode: str,
-                 kaiforecast_version: str,
+                 kaiforecast_version: Optional[str],
                  long_spread: float,
                  short_spread: float,
                  long_ttp: float,
@@ -282,6 +282,8 @@ class HeikinAshiBase(Strategy):
         self.ha_trend = 0
         self.mode = mode
         self.kaiforecast_version = kaiforecast_version
+        logging.info(f"[signal] [{str(strategy)}] run the strategu with "
+                     f"kaiforecast version: {str(kaiforecast_version)}.")
 
     def scout(self,
               base: str,
@@ -505,7 +507,7 @@ class HeikinAshiRegression(HeikinAshiBase):
     """
     def __init__(self,
                  mode: str,
-                 kaiforecast_version: str,
+                 kaiforecast_version: Optional[str],
                  long_spread: float,
                  short_spread: float,
                  long_ttp: float,
@@ -563,7 +565,8 @@ class HeikinAshiRegression(HeikinAshiBase):
                 percentage spread, direction, the number of n-tick
                 predicted forward, the base pair and the quote pair.
         """
-        if self.endpoint:  # use the cloud function predictor (old/prod model)
+        # use the cloud function predictor (old/prod model)
+        if self.kaiforecast_version is None:
             reg_result = predict(
                 endpoint=self.endpoint, base=base, quote=quote, data=data)
             if not reg_result: return None, None, None, base, quote
@@ -575,7 +578,8 @@ class HeikinAshiRegression(HeikinAshiBase):
             _spread = float(pred['percentage_spread'])
             _direction = int(pred['direction'])
             _n_ticks = int(pred['n_tick_forward'])
-        else:  # use the cloud run predictor (latest/dev model)
+        # use the cloud run predictor (latest/dev model)
+        else:
             reg_result = predict_cloud_run_regression(
                 mode=mode,
                 kaiforecast_version=self.kaiforecast_version,
@@ -600,7 +604,7 @@ class HeikinAshiHybrid(HeikinAshiBase):
     """
     def __init__(self,
                  mode: str,
-                 kaiforecast_version: str,
+                 kaiforecast_version: Optional[str],
                  classification_threshold: float,
                  long_spread: float,
                  short_spread: float,
@@ -630,6 +634,8 @@ class HeikinAshiHybrid(HeikinAshiBase):
             description=description
         )
         self.classification_threshold = classification_threshold
+        if self.kaiforecast_version is None:
+            raise ValueError(f"Please input the kaiforecast version!")
 
     def layer2(self,
                base: str,
