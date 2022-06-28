@@ -32,7 +32,7 @@ class SignalEngine():
         log_every: int,
         log_metrics_every: int,
         strategy: StrategyType = StrategyType.SUPER_TREND_SQUEEZE,
-        endpoint: str = '',
+        endpoint: str = 'predict_15m',
         strategy_params: dict = {}):
         """ Will initialize the signal engine
             to scout for potential actionable intelligence
@@ -917,7 +917,7 @@ class SignalEngine():
         elif self.strategy_type == StrategyType.HEIKIN_ASHI_HYBRID:
             return strategy_class(
                 mode=strategy_params['mode'],
-                kaiforecast_version=strategy_params['kaiforecast_version'],
+                kaiforecast_version=strategy_params.get("kaiforecast_version", None),
                 classification_threshold=strategy_params[
                     'classification_threshold'],
                 long_spread=thresholds['long']['bet_threshold'],
@@ -933,7 +933,7 @@ class SignalEngine():
         elif self.strategy_type == StrategyType.HEIKIN_ASHI_REGRESSION:
             return strategy_class(
                 mode=strategy_params['mode'],
-                kaiforecast_version=strategy_params['kaiforecast_version'],
+                kaiforecast_version=strategy_params.get("kaiforecast_version", None),
                 long_spread=thresholds['long']['bet_threshold'],
                 short_spread=thresholds['short']['bet_threshold'],
                 long_ttp=thresholds['long']['ttp_threshold'],

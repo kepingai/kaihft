@@ -76,6 +76,8 @@ def main(exchange: str,
         params.update({"ha_klines": dict(id=heikin_ashi_topic_path, timeout=timeout)})
         strategy_params.update({"heikin_ashi_subscriber": heikin_ashi_subscriber,
                                 "mode": path})
+    logging.info(f"[signal-{version}] [{exchange}] subscription params: {params}.")
+    logging.info(f"[signal-{version}] [{exchange}] strategy params: {strategy_params}.")
 
     # initialize publisher
     publisher = KaiPublisherClient()
