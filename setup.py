@@ -11,7 +11,7 @@ setuptools.setup(
         "kaihft.services",
         "kaihft.subscribers"
     ],
-    version="0.1.7",
+    version="0.1.7.1",
     author="PT. Idabagus Engineering Indonesia",
     author_email="support@kepingai.com",
     maintainer="Ida Bagus Ratu Diaz Agasatya", 
