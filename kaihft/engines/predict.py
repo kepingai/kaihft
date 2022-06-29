@@ -124,8 +124,8 @@ def predict(endpoint: str, base: str, quote: str, data: dict) -> Union[dict, Non
     result = requests.post(model_url, data=json.dumps(params), headers=headers)
     if result.status_code == 200 and result.content:
         return json.loads(result.content)
-    logging.warn(f"[predict] failed inferencing to layer 2, "
-        f"status-code:{result.status_code}, symbol: {base}{quote}")
+    logging.warn(f"[predict] failed inferencing to layer 2, status-code: "
+                 f"{result.status_code}, symbol: {base}{quote}, content: {result.content}")
     return None
 
 
