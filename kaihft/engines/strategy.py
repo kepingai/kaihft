@@ -52,7 +52,8 @@ class Strategy():
                  short_spread: float,
                  short_ttp: float,
                  pairs: dict,
-                 log_every: int):
+                 log_every: int,
+                 expiration_minutes: Optional[Union[int, float]] = None):
         self.strategy = strategy
         self.name = name
         self.description = description
@@ -63,6 +64,7 @@ class Strategy():
         self.short_ttp = short_ttp
         self.pairs = pairs
         self.log_every = log_every
+        self.expiration_minutes = expiration_minutes
         # initialize multi-core threads
         ne.set_vml_num_threads(8)
         # initialize running metrics
@@ -72,6 +74,9 @@ class Strategy():
         logging.info(f"[strategy] Strategy initialized {self.name}  ({self.strategy}), "
             f"long_spread: {self.long_spread}, long_ttp: {self.long_ttp}, "
             f"short_spread: {self.short_spread}, short_ttp: {self.short_ttp}")
+        if self.expiration_minutes is not None:
+            logging.info(f"[strategy] The signal is set to be expired in "
+                         f"{self.expiration_minutes} minute(s).")
 
     @abstractmethod
     def scout(self, base: str, quote: str, dataframe: pd.DataFrame,
@@ -262,7 +267,8 @@ class HeikinAshiBase(Strategy):
                  ha_ema_len: int,
                  log_every: int,
                  description: str = "Heikin-Ashi Buy and Sell Strategy by Coinsspor",
-                 endpoint: str = ""):
+                 endpoint: str = "",
+                 expiration_minutes: Optional[Union[int, float]] = None):
 
         super(HeikinAshiBase, self).__init__(
             name=name,
@@ -274,7 +280,9 @@ class HeikinAshiBase(Strategy):
             short_spread=short_spread,
             short_ttp=short_ttp,
             pairs=pairs,
-            log_every=log_every)
+            log_every=log_every,
+            expiration_minutes=expiration_minutes
+        )
 
         self.ha_timeframe = ha_timeframe
         self.model_timeframe = model_timeframe
@@ -282,8 +290,10 @@ class HeikinAshiBase(Strategy):
         self.ha_trend = 0
         self.mode = mode
         self.kaiforecast_version = kaiforecast_version
-        logging.info(f"[signal] [{str(strategy)}] run the strategu with "
-                     f"kaiforecast version: {str(kaiforecast_version)}.")
+        logging.info(f"[strategy] [{str(strategy)}] run the {model_timeframe} "
+                     f"strategy with kaiforecast {str(kaiforecast_version)}. "
+                     f"[heikin-ashi] config --- timeframe: {ha_timeframe}, "
+                     f"EMA length: {ha_ema_len}.")
 
     def scout(self,
               base: str,
@@ -356,7 +366,7 @@ class HeikinAshiBase(Strategy):
 
             if _spread is None or _direction is None: return None
             # ensure that spread is above threshold and direction matches.
-            if _spread >= self.short_spread and _direction == 1:
+            if _spread >= self.short_spread and _direction == 0:
                 ttp = self.short_ttp
                 signal = True
             # record the ending time of analysis
@@ -372,7 +382,9 @@ class HeikinAshiBase(Strategy):
             last_price=float(last_price),
             direction=_direction,
             callback=callback,
-            n_tick_forward=_n_tick) if signal else None
+            n_tick_forward=_n_tick,
+            expiration_minutes=self.expiration_minutes
+        ) if signal else None
 
     def layer2(self,
                base: str,
@@ -517,7 +529,8 @@ class HeikinAshiRegression(HeikinAshiBase):
                  model_timeframe: str,
                  ha_ema_len: int,
                  log_every: int,
-                 endpoint: str = ""):
+                 endpoint: str = "",
+                 expiration_minutes: Optional[Union[int, float]] = None):
         description = "Heikin-Ashi Buy and Sell Strategy by Coinsspor for " \
                       "Regression Model"
         super(HeikinAshiRegression, self).__init__(
@@ -535,7 +548,8 @@ class HeikinAshiRegression(HeikinAshiBase):
             ha_ema_len=ha_ema_len,
             log_every=log_every,
             description=description,
-            endpoint=endpoint
+            endpoint=endpoint,
+            expiration_minutes=expiration_minutes
         )
 
     def layer2(self,
@@ -614,7 +628,8 @@ class HeikinAshiHybrid(HeikinAshiBase):
                  ha_timeframe: str,
                  model_timeframe: str,
                  ha_ema_len: int,
-                 log_every: int):
+                 log_every: int,
+                 expiration_minutes: Optional[Union[int, float]] = None):
         description = "Heikin-Ashi Buy and Sell Strategy by Coinsspor for " \
                       "Hybrid Model (Regression and Classification)"
         super(HeikinAshiHybrid, self).__init__(
@@ -631,7 +646,8 @@ class HeikinAshiHybrid(HeikinAshiBase):
             model_timeframe=model_timeframe,
             ha_ema_len=ha_ema_len,
             log_every=log_every,
-            description=description
+            description=description,
+            expiration_minutes=expiration_minutes
         )
         self.classification_threshold = classification_threshold
         if self.kaiforecast_version is None:
@@ -701,7 +717,8 @@ class SuperTrendSqueeze(Strategy):
                  short_spread: float,
                  short_ttp: float,
                  pairs: dict,
-                 log_every: int):
+                 log_every: int,
+                 expiration_minutes: Optional[Union[int, float]] = None):
         """ Initialize SuperTrendSqueeze class with specified spread & take profit
             percentage thresholds.
 
@@ -732,7 +749,9 @@ class SuperTrendSqueeze(Strategy):
             short_spread=short_spread,
             short_ttp=short_ttp,
             pairs=pairs,
-            log_every=log_every)
+            log_every=log_every,
+            expiration_minutes=expiration_minutes
+        )
         # in this class we will be using
         # lazybear's momentum squeeze, ema 99
         # supertrend and sma for technical analysis
@@ -855,7 +874,9 @@ class SuperTrendSqueeze(Strategy):
             last_price=float(last_price),
             direction=_direction,
             callback=callback,
-            n_tick_forward=_n_tick) if signal else None
+            n_tick_forward=_n_tick,
+            expiration_minutes=self.expiration_minutes
+        ) if signal else None
 
 
 class MaxDrawdownSpread(Strategy):
@@ -873,7 +894,8 @@ class MaxDrawdownSpread(Strategy):
                  short_max_drawdown: float,
                  pairs: dict,
                  log_every: int,
-                 buffer: int):
+                 buffer: int,
+                 expiration_minutes: Optional[Union[int, float]] = None):
         """ Initialize MaxDrawdownSpread class with specified minimum spread, 
             take profit percentage thresholds and max drawdowns.
 
@@ -910,7 +932,8 @@ class MaxDrawdownSpread(Strategy):
             short_spread=short_spread,
             short_ttp=short_ttp,
             pairs=pairs,
-            log_every=log_every
+            log_every=log_every,
+            expiration_minutes=expiration_minutes
         )
         # in this class we will be using maximum drawdowns
         # as the main algorithmic approach from layer 2 predictions
@@ -1006,7 +1029,9 @@ class MaxDrawdownSpread(Strategy):
             last_price=float(last_price),
             direction=_direction,
             callback=callback,
-            n_tick_forward=_n_tick) if signal else None
+            n_tick_forward=_n_tick,
+            expiration_minutes=self.expiration_minutes
+        ) if signal else None
 
 
 class MaxDrawdownSuperTrendSpread(Strategy):
@@ -1024,7 +1049,8 @@ class MaxDrawdownSuperTrendSpread(Strategy):
                  short_max_drawdown: float,
                  pairs: dict,
                  log_every: int,
-                 buffer: int):
+                 buffer: int,
+                 expiration_minutes: Optional[Union[int, float]] = None):
         """ Initialize MaxDrawdownSuperTrendSpread class with specified 
             minimum spread, take profit percentage thresholds and max 
             drawdowns.
@@ -1062,7 +1088,8 @@ class MaxDrawdownSuperTrendSpread(Strategy):
             short_spread=short_spread,
             short_ttp=short_ttp,
             pairs=pairs,
-            log_every=log_every
+            log_every=log_every,
+            expiration_minutes=expiration_minutes
         )
         # in this class we will be using maximum drawdowns
         # as the main algorithmic approach from layer 2 predictions
@@ -1177,7 +1204,9 @@ class MaxDrawdownSuperTrendSpread(Strategy):
             last_price=float(last_price),
             direction=_direction,
             callback=callback,
-            n_tick_forward=_n_tick) if signal else None
+            n_tick_forward=_n_tick,
+            expiration_minutes=self.expiration_minutes
+        ) if signal else None
 
 
 class MaxDrawdownSqueeze(Strategy):
@@ -1194,7 +1223,8 @@ class MaxDrawdownSqueeze(Strategy):
                  short_ttp: float,
                  short_max_drawdown: float,
                  pairs: dict,
-                 log_every: int):
+                 log_every: int,
+                 expiration_minutes: Optional[Union[int, float]] = None):
         """ Initialize MaxDrawdownSqueeze class with specified spread, take profit
             percentage thresholds and max drawdowns.
 
@@ -1229,7 +1259,8 @@ class MaxDrawdownSqueeze(Strategy):
             short_spread=short_spread,
             short_ttp=short_ttp,
             pairs=pairs,
-            log_every=log_every
+            log_every=log_every,
+            expiration_minutes=expiration_minutes
         )
         # in this class we will be using maximum drawdowns
         # as the main algorithmic approach from layer 2 predictions
@@ -1319,7 +1350,9 @@ class MaxDrawdownSqueeze(Strategy):
             last_price=float(last_price),
             direction=_direction,
             callback=callback,
-            n_tick_forward=_n_tick) if signal else None
+            n_tick_forward=_n_tick,
+            expiration_minutes=self.expiration_minutes
+        ) if signal else None
 
 
 __REGISTRY = {

@@ -1,6 +1,7 @@
 import uuid, logging
 from datetime import datetime, timedelta
 from enum import Enum
+from typing import Optional, Union
 
 from numpy.core.fromnumeric import take
 
@@ -39,7 +40,8 @@ class Signal():
                  id: str = None,
                  created_at: int = None,
                  expired_at: int = None,
-                 status: SignalStatus = SignalStatus.NEW):
+                 status: SignalStatus = SignalStatus.NEW,
+                 expiration_minutes: Optional[Union[int, float]] = None):
         """ Initializing a signal class.
 
             Parameters
@@ -74,6 +76,9 @@ class Signal():
                 The UTC timestamp signal to be expired.
             status: `SignalStatus`
                 The current status.
+            expiration_minutes: `Optional[Union[int, float]]`
+                The expiration duration in minutes, if None: use the expiration
+                calculation using the n_tick_forward and buffer.
         """
         self.id = id if id else str(uuid.uuid4())
         self.base = base
@@ -91,9 +96,11 @@ class Signal():
         self._status = status
         self.buffer = buffer
         self.realized_profit = realized_profit
+        if expiration_minutes is None:
+            expiration_minutes = (45 * (n_tick_forward + buffer))
         self.created_at = datetime.utcnow().timestamp() if not created_at else created_at
         self.expired_at = ((datetime.fromtimestamp(self.created_at) + timedelta(
-            minutes=(45 * (n_tick_forward + buffer)))).timestamp()
+            minutes=expiration_minutes)).timestamp()
             if not expired_at else expired_at)
         logging.info(f"[signal] created! symbol:{self.symbol}, "
             f"spread: {self.spread}, ttp: {self.take_profit}, direction: {self.direction}")

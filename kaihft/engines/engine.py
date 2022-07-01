@@ -930,7 +930,8 @@ class SignalEngine():
                 short_spread=thresholds['short']['bet_threshold'],
                 short_ttp=thresholds['short']['ttp_threshold'],
                 pairs=self.pairs,
-                log_every=self.log_metrics_every
+                log_every=self.log_metrics_every,
+                expiration_minutes=strategy_params.get("expiration_minutes", None)
             )
         elif self.strategy_type == StrategyType.MAX_DRAWDOWN_SQUEEZE:
             return strategy_class(
@@ -942,7 +943,8 @@ class SignalEngine():
                 short_ttp=thresholds['short']['ttp_threshold'],
                 short_max_drawdown=self.max_drawdowns['short'],
                 pairs=self.pairs,
-                log_every=self.log_metrics_every
+                log_every=self.log_metrics_every,
+                expiration_minutes=strategy_params.get("expiration_minutes", None)
             )
         elif (self.strategy_type == StrategyType.MAX_DRAWDOWN_SPREAD or 
               self.strategy_type == StrategyType.MAX_DRAWDOWN_SUPER_TREND_SPREAD):
@@ -956,7 +958,8 @@ class SignalEngine():
                 short_max_drawdown=self.max_drawdowns['short'],
                 pairs=self.pairs,
                 log_every=self.log_metrics_every,
-                buffer=self.buffers['inference']
+                buffer=self.buffers['inference'],
+                expiration_minutes=strategy_params.get("expiration_minutes", None)
             )
         elif self.strategy_type == StrategyType.HEIKIN_ASHI_HYBRID:
             return strategy_class(
@@ -972,7 +975,8 @@ class SignalEngine():
                 ha_timeframe=strategy_params['ha_timeframe'],
                 model_timeframe=strategy_params['timeframe'],
                 ha_ema_len=strategy_params['ha_ema_len'],
-                log_every=self.log_metrics_every
+                log_every=self.log_metrics_every,
+                expiration_minutes=strategy_params.get("expiration_minutes", None)
             )
         elif self.strategy_type == StrategyType.HEIKIN_ASHI_REGRESSION:
             return strategy_class(
@@ -987,7 +991,8 @@ class SignalEngine():
                 model_timeframe=strategy_params['timeframe'],
                 ha_ema_len=strategy_params['ha_ema_len'],
                 log_every=self.log_metrics_every,
-                endpoint=self.endpoint
+                endpoint=self.endpoint,
+                expiration_minutes=strategy_params.get("expiration_minutes", None)
             )
         else:
             raise ValueError(f"[strategy] strategy type: {self.strategy_type} not valid!")
