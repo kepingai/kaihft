@@ -30,8 +30,8 @@ def main(
     elif exp0a: topic_path = f'exp0a-{topic_path}'; mode="experiment-0a"
     elif exp1a: topic_path = f'exp1a-{topic_path}'; mode="experiment-1a"
     else: topic_path = f'dev-{topic_path}'; mode="development"
-    logging.warn(f"[{mode}-mode] tickers-BINANCE-FUTURES, markets: {markets}, "
-        f"topic: prod-{topic_path}")
+    logging.info(f"[{mode}-mode] tickers-BINANCE-FUTURES, topic: {topic_path}, "
+                 f"markets: {markets}.")
     # binance only allows 1024 subscriptions in one stream
     # channels and markets and initiate multiplex stream
     # channels x markets = (total subscription)

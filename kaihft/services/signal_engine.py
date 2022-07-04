@@ -61,8 +61,8 @@ def main(exchange: str,
     max_drawdowns_ref = f"{path}/max_drawdowns"
     buffers_ref = f"{path}/buffers"
     pairs_ref = f"{path}/pairs"
-    logging.warn(f"[{mode}-mode] strategy: BINANCE-FUTURES-{strategy}"
-        f"paths: ticker: {ticker_topic_path}, klines: {klines_topic_path},"
+    logging.warn(f"[{mode}-mode] strategy: BINANCE-FUTURES-{strategy}. [paths] "
+        f"--- ticker: {ticker_topic_path}, klines: {klines_topic_path},"
         f"distribute: {dist_topic_path}, archive: {archive_topic_path}, "
         f"layer 2 endpoint: {endpoint}")
     # initialize signal engine class and run it
@@ -70,12 +70,14 @@ def main(exchange: str,
         "ticker": dict(id=ticker_topic_path, timeout=timeout),
         "klines": dict(id=klines_topic_path, timeout=timeout)}
 
-    if strategy == 'HEIKIN_ASHI_COINSSPOR':
+    if 'HEIKIN_ASHI' in str(strategy):
         heikin_ashi_topic_path = f'{path}-klines-{exchange}-{version}-{strategy_params["ha_timeframe"]}-sub'
         heikin_ashi_subscriber = KaiSubscriberClient()
         params.update({"ha_klines": dict(id=heikin_ashi_topic_path, timeout=timeout)})
         strategy_params.update({"heikin_ashi_subscriber": heikin_ashi_subscriber,
                                 "mode": path})
+    logging.info(f"[signal-{version}] [{exchange}] subscription params: {params}.")
+    logging.info(f"[signal-{version}] [{exchange}] strategy params: {strategy_params}.")
 
     # initialize publisher
     publisher = KaiPublisherClient()

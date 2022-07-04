@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
-import logging, json, asyncio
-from datetime import datetime, timedelta
+import logging, json, asyncio, time
+from datetime import datetime, timedelta, timezone
 from google.cloud import pubsub_v1
 from kaihft.databases import KaiRealtimeDatabase
 from kaihft.publishers.client import KaiPublisherClient
@@ -120,6 +120,7 @@ class SignalEngine():
         self.endpoint = endpoint
         self.strategy = self._get_strategy(strategy, self.thresholds, strategy_params)
         self.strategy_params = strategy_params
+        self.is_ready = False
     
     def run(self):
         """ Will run signal engine concurrently, 
@@ -143,7 +144,7 @@ class SignalEngine():
             and begin the signal engine on scouting and monitoring
             ongoing signals concurrently.
         """
-        if self.strategy_type == 'HEIKIN_ASHI_COINSSPOR':
+        if 'HEIKIN_ASHI' in str(self.strategy_type):
             ha_subscriber = self.strategy_params['heikin_ashi_subscriber']
             ha_callback = self.strategy.calculate_heikin_ashi_trend
             await asyncio.gather(
@@ -163,6 +164,7 @@ class SignalEngine():
                 self.listen_max_drawdowns(self._update_max_drawdowns),
                 self.listen_buffers(self._update_buffers)
             )
+        self.is_ready = True
 
         with self.ticker_subscriber.client, self.klines_subscriber.client:
             try:
@@ -376,7 +378,49 @@ class SignalEngine():
             single_stream: `bool`
                 True if the whole engine is meant to subscribe in singular topic only.
         """
+        # purging the subscription if needed
+        sub_id = self.subscriptions_params[subscription]['id']
+        topic_id = sub_id.rsplit("-", 1)[0]
+        _subscriber = KaiSubscriberClient()
+        subscription_path = _subscriber.client.subscription_path(
+            _subscriber.project_id, sub_id)
+        topic_path = _subscriber.client.topic_path(
+            _subscriber.project_id, topic_id)
+
+        logging.info(f"[{str(self.strategy_type)}] [subscription] purging the "
+                     f"subscription path for '{sub_id}' in 30 seconds ...")
+        with _subscriber.client:
+            # delete the subscription and create a new one
+            try:
+                _subscriber.client.delete_subscription(
+                    request=dict(subscription=subscription_path))
+                logging.info(f"[{str(self.strategy_type)}] [subscription] "
+                             f"deleted: {subscription_path}")
+            except Exception as e:
+                if '404' not in str(e):
+                    logging.critical(f"[{str(self.strategy_type)}] "
+                                     f"[subscription] unable to delete the "
+                                     f"path: {subscription_path}, error: {e}")
+                    raise e
+            time.sleep(30)
+            # create the same subscription with the same name
+            try:
+                _subscription = _subscriber.client.create_subscription(
+                    request=dict(name=subscription_path, topic=topic_path))
+                logging.info(f"[{str(self.strategy_type)}] [subscription] "
+                             f"created: {_subscription}")
+            except Exception as e:
+                if '409' not in str(e):
+                    logging.critical(f"[{str(self.strategy_type)}] "
+                                     f"[subscription] unable to create the "
+                                     f"path: {subscription_path}, error: {e}")
+                    raise e
+
         # start subscription path and futures
+        logging.info(f"[{str(self.strategy_type)}] [subscription] will wait "
+                     f"for 30 seconds before subscribing to the newly created "
+                     f"subscription entity: {subscription} ...")
+        time.sleep(30)
         subscriber.subscribe(
             subscription_id=self.subscriptions_params[subscription]['id'],
             timeout=self.subscriptions_params[subscription]['timeout'],
@@ -427,7 +471,7 @@ class SignalEngine():
             message: `pubsub_v1.subscriber.message.Message`
                 The message from Cloud pub/sub.
         """
-        if message.attributes and 'timestamp' in message.attributes:
+        if message.attributes and 'timestamp' in message.attributes and self.is_ready:
             # get the attributes of the message
             symbol = message.attributes.get("symbol")
             timestamp = int(message.attributes.get("timestamp"))
@@ -886,7 +930,9 @@ class SignalEngine():
                 short_spread=thresholds['short']['bet_threshold'],
                 short_ttp=thresholds['short']['ttp_threshold'],
                 pairs=self.pairs,
-                log_every=self.log_metrics_every)
+                log_every=self.log_metrics_every,
+                expiration_minutes=strategy_params.get("expiration_minutes", None)
+            )
         elif self.strategy_type == StrategyType.MAX_DRAWDOWN_SQUEEZE:
             return strategy_class(
                 endpoint=self.endpoint,
@@ -897,7 +943,9 @@ class SignalEngine():
                 short_ttp=thresholds['short']['ttp_threshold'],
                 short_max_drawdown=self.max_drawdowns['short'],
                 pairs=self.pairs,
-                log_every=self.log_metrics_every)
+                log_every=self.log_metrics_every,
+                expiration_minutes=strategy_params.get("expiration_minutes", None)
+            )
         elif (self.strategy_type == StrategyType.MAX_DRAWDOWN_SPREAD or 
               self.strategy_type == StrategyType.MAX_DRAWDOWN_SUPER_TREND_SPREAD):
             return strategy_class(
@@ -910,22 +958,41 @@ class SignalEngine():
                 short_max_drawdown=self.max_drawdowns['short'],
                 pairs=self.pairs,
                 log_every=self.log_metrics_every,
-                buffer=self.buffers['inference'])
-
-        elif self.strategy_type == StrategyType.HEIKIN_ASHI_COINSSPOR:
+                buffer=self.buffers['inference'],
+                expiration_minutes=strategy_params.get("expiration_minutes", None)
+            )
+        elif self.strategy_type == StrategyType.HEIKIN_ASHI_HYBRID:
             return strategy_class(
-                long_spread=thresholds['long']['bet_threshold'],
-                long_ttp=thresholds['long']['ttp_threshold'],
-                short_spread=thresholds['short']['bet_threshold'],
-                short_ttp=thresholds['short']['ttp_threshold'],
                 mode=strategy_params['mode'],
-                kaiforecast_version=strategy_params['kaiforecast_version'],
-                classification_threshold=strategy_params['classification_threshold'],
+                kaiforecast_version=strategy_params.get("kaiforecast_version", None),
+                classification_threshold=strategy_params[
+                    'classification_threshold'],
+                long_spread=thresholds['long']['bet_threshold'],
+                short_spread=thresholds['short']['bet_threshold'],
+                long_ttp=thresholds['long']['ttp_threshold'],
+                short_ttp=thresholds['short']['ttp_threshold'],
+                pairs=self.pairs,
                 ha_timeframe=strategy_params['ha_timeframe'],
                 model_timeframe=strategy_params['timeframe'],
                 ha_ema_len=strategy_params['ha_ema_len'],
+                log_every=self.log_metrics_every,
+                expiration_minutes=strategy_params.get("expiration_minutes", None)
+            )
+        elif self.strategy_type == StrategyType.HEIKIN_ASHI_REGRESSION:
+            return strategy_class(
+                mode=strategy_params['mode'],
+                kaiforecast_version=strategy_params.get("kaiforecast_version", None),
+                long_spread=thresholds['long']['bet_threshold'],
+                short_spread=thresholds['short']['bet_threshold'],
+                long_ttp=thresholds['long']['ttp_threshold'],
+                short_ttp=thresholds['short']['ttp_threshold'],
                 pairs=self.pairs,
-                log_every=self.log_metrics_every)
-
+                ha_timeframe=strategy_params['ha_timeframe'],
+                model_timeframe=strategy_params['timeframe'],
+                ha_ema_len=strategy_params['ha_ema_len'],
+                log_every=self.log_metrics_every,
+                endpoint=self.endpoint,
+                expiration_minutes=strategy_params.get("expiration_minutes", None)
+            )
         else:
             raise ValueError(f"[strategy] strategy type: {self.strategy_type} not valid!")

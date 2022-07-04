@@ -5,9 +5,9 @@ import numpy as np
 import numexpr as ne
 import pandas_ta as ta
 from enum import Enum
-from typing import Union, Tuple
+from typing import Union, Tuple, Optional
 from .signal import Signal
-from .predict import predict, predict_cloud_run
+from .predict import predict, predict_cloud_run, predict_cloud_run_regression
 from datetime import datetime, timedelta
 from abc import abstractmethod
 from google.cloud import pubsub_v1
@@ -21,7 +21,8 @@ class StrategyType(Enum):
     MAX_DRAWDOWN_SQUEEZE = "MAX_DRAWDOWN_SQUEEZE"
     MAX_DRAWDOWN_SPREAD = "MAX_DRAWDOWN_SPREAD"
     MAX_DRAWDOWN_SUPER_TREND_SPREAD = "MAX_DRAWDOWN_SUPER_TREND_SPREAD"
-    HEIKIN_ASHI_COINSSPOR = "HEIKIN_ASHI_COINSSPOR"
+    HEIKIN_ASHI_HYBRID = "HEIKIN_ASHI_HYBRID"
+    HEIKIN_ASHI_REGRESSION = "HEIKIN_ASHI_REGRESSION"
 
     def __str__(self):
         """ Convert the enum object to string. 
@@ -38,6 +39,7 @@ class StrategyType(Enum):
             return str(self.value).upper() == __o.upper()
         return super().__eq__(__o)
 
+
 class Strategy():
     """ Abstract strategy class. """
     def __init__(self, 
@@ -50,7 +52,8 @@ class Strategy():
                  short_spread: float,
                  short_ttp: float,
                  pairs: dict,
-                 log_every: int):
+                 log_every: int,
+                 expiration_minutes: Optional[Union[int, float]] = None):
         self.strategy = strategy
         self.name = name
         self.description = description
@@ -61,6 +64,7 @@ class Strategy():
         self.short_ttp = short_ttp
         self.pairs = pairs
         self.log_every = log_every
+        self.expiration_minutes = expiration_minutes
         # initialize multi-core threads
         ne.set_vml_num_threads(8)
         # initialize running metrics
@@ -70,9 +74,13 @@ class Strategy():
         logging.info(f"[strategy] Strategy initialized {self.name}  ({self.strategy}), "
             f"long_spread: {self.long_spread}, long_ttp: {self.long_ttp}, "
             f"short_spread: {self.short_spread}, short_ttp: {self.short_ttp}")
+        if self.expiration_minutes is not None:
+            logging.info(f"[strategy] The signal is set to be expired in "
+                         f"{self.expiration_minutes} minute(s).")
 
     @abstractmethod
-    def scout(self, dataframe: pd.DataFrame) -> Union[Signal, None]:
+    def scout(self, base: str, quote: str, dataframe: pd.DataFrame,
+              callback: callable) -> Union[Signal, None]:
         raise NotImplementedError()
     
     def layer2(self, base: str, quote: str, data: dict):
@@ -236,15 +244,19 @@ class Strategy():
         return False
 
 
-class HeikinAshiCoinsspor(Strategy):
-    """ Heikin Ashi Coinsspor strategy implementation
-        will scout for potential actionable
-        intelligence based on a specific market behavior.
+class HeikinAshiBase(Strategy):
+    """ Heikin Ashi Coinsspor strategy implementation, will scout for
+        potential actionable intelligence based on a specific market behavior.
+
+        Notes
+        -----
+        Will act as the base class for all Heikin-Ashi strategy.
     """
     def __init__(self,
+                 name: str,
+                 strategy: StrategyType,
                  mode: str,
-                 kaiforecast_version: str,
-                 classification_threshold: float,
+                 kaiforecast_version: Optional[str],
                  long_spread: float,
                  short_spread: float,
                  long_ttp: float,
@@ -253,27 +265,35 @@ class HeikinAshiCoinsspor(Strategy):
                  ha_timeframe: str,
                  model_timeframe: str,
                  ha_ema_len: int,
-                 log_every: int):
+                 log_every: int,
+                 description: str = "Heikin-Ashi Buy and Sell Strategy by Coinsspor",
+                 endpoint: str = "",
+                 expiration_minutes: Optional[Union[int, float]] = None):
 
-        super(HeikinAshiCoinsspor, self).__init__(
-            name=str(StrategyType.HEIKIN_ASHI_COINSSPOR),
-            strategy=StrategyType.HEIKIN_ASHI_COINSSPOR,
-            description="Heikin-Ashi Buy and Sell Strategy by Coinsspor",
-            endpoint='',
+        super(HeikinAshiBase, self).__init__(
+            name=name,
+            strategy=strategy,
+            description=description,
+            endpoint=endpoint,
             long_spread=long_spread,
             long_ttp=long_ttp,
             short_spread=short_spread,
             short_ttp=short_ttp,
             pairs=pairs,
-            log_every=log_every)
+            log_every=log_every,
+            expiration_minutes=expiration_minutes
+        )
 
         self.ha_timeframe = ha_timeframe
         self.model_timeframe = model_timeframe
         self.ha_ema_len = ha_ema_len
-        self.classification_threshold = classification_threshold
         self.ha_trend = 0
         self.mode = mode
         self.kaiforecast_version = kaiforecast_version
+        logging.info(f"[strategy] [{str(strategy)}] run the {model_timeframe} "
+                     f"strategy with kaiforecast {str(kaiforecast_version)}. "
+                     f"[heikin-ashi] config --- timeframe: {ha_timeframe}, "
+                     f"EMA length: {ha_ema_len}.")
 
     def scout(self,
               base: str,
@@ -323,7 +343,6 @@ class HeikinAshiCoinsspor(Strategy):
                 quote=quote,
                 data=clean_df.to_dict('list'),
                 mode=self.mode,
-                kaiforecast_version=self.kaiforecast_version,
                 ha_trend=self.ha_trend)
 
             if _spread is None or _direction is None: return None
@@ -342,13 +361,12 @@ class HeikinAshiCoinsspor(Strategy):
                 quote=quote,
                 data=clean_df.to_dict('list'),
                 mode=self.mode,
-                kaiforecast_version=self.kaiforecast_version,
                 ha_trend=self.ha_trend
             )
 
             if _spread is None or _direction is None: return None
             # ensure that spread is above threshold and direction matches.
-            if _spread >= self.short_spread and _direction == 1:
+            if _spread >= self.short_spread and _direction == 0:
                 ttp = self.short_ttp
                 signal = True
             # record the ending time of analysis
@@ -364,63 +382,20 @@ class HeikinAshiCoinsspor(Strategy):
             last_price=float(last_price),
             direction=_direction,
             callback=callback,
-            n_tick_forward=_n_tick) if signal else None
+            n_tick_forward=_n_tick,
+            expiration_minutes=self.expiration_minutes
+        ) if signal else None
 
     def layer2(self,
                base: str,
                quote: str,
                data: dict,
                mode: str,
-               kaiforecast_version: str,
-               ha_trend: int
-               ):
-        """ Connect to layer 2 and inference to specific model.
+               ha_trend: int):
+        """ Connect to layer 2 and inference to specific model. """
+        raise NotImplementedError()
 
-            Parameters
-            ----------
-            base: `str`
-                The base symbol of the ticker.
-            quote: `str`
-                The quote symbol of the ticker.
-            data: `dict`
-                Dictionary containing list of klines.
-            mode: `str`
-            kaiforecast_version: `str`
-            ha_trend: `int`
-
-            Returns
-            -------
-            `(float, int, int, str, str)`
-                If prediction is successful it will return the
-                percentage spread, direction, the number of n-tick
-                predicted forward, the base pair and the quote pair.
-        """
-        reg_result, cls_result = predict_cloud_run(mode=mode,
-                                                   kaiforecast_version=kaiforecast_version,
-                                                   base=base,
-                                                   quote=quote,
-                                                   data=data,
-                                                   timeframe=self.model_timeframe,
-                                                   ha_trend=ha_trend)
-
-        # if prediction fails return nones
-        if not reg_result and not cls_result:
-            return None, None, None, base, quote
-
-        else:
-            cls_prob = cls_result['predictions']
-            if (
-                    # cls_prob[0] > cls_prob[1] and
-                    cls_prob[0] > self.classification_threshold):
-                _spread = reg_result['predictions']['percentage_spread']
-                _direction = reg_result['predictions']['direction']
-                _n_ticks = reg_result['predictions']['n_tick_forward']
-                return _spread, _direction, _n_ticks, base, quote
-            else:
-                return None, None, None, base, quote
-
-    def calculate_heikin_ashi_trend(self,
-                                    message: pubsub_v1.subscriber.message.Message):
+    def calculate_heikin_ashi_trend(self, message: pubsub_v1.subscriber.message.Message):
         """ This function calculates the buy and sell signals based on Coinsspor Heikin Ashi Tradingview signals.
 
             Parameters
@@ -537,6 +512,199 @@ class HeikinAshiCoinsspor(Strategy):
         return dataframe
 
 
+class HeikinAshiRegression(HeikinAshiBase):
+    """ Heikin Ashi Regression strategy implementation
+        will scout for potential actionable
+        intelligence based on a specific market behavior.
+    """
+    def __init__(self,
+                 mode: str,
+                 kaiforecast_version: Optional[str],
+                 long_spread: float,
+                 short_spread: float,
+                 long_ttp: float,
+                 short_ttp: float,
+                 pairs: dict,
+                 ha_timeframe: str,
+                 model_timeframe: str,
+                 ha_ema_len: int,
+                 log_every: int,
+                 endpoint: str = "",
+                 expiration_minutes: Optional[Union[int, float]] = None):
+        description = "Heikin-Ashi Buy and Sell Strategy by Coinsspor for " \
+                      "Regression Model"
+        super(HeikinAshiRegression, self).__init__(
+            name=str(StrategyType.HEIKIN_ASHI_REGRESSION),
+            strategy=StrategyType.HEIKIN_ASHI_REGRESSION,
+            mode=mode,
+            kaiforecast_version=kaiforecast_version,
+            long_spread=long_spread,
+            short_spread=short_spread,
+            long_ttp=long_ttp,
+            short_ttp=short_ttp,
+            pairs=pairs,
+            ha_timeframe=ha_timeframe,
+            model_timeframe=model_timeframe,
+            ha_ema_len=ha_ema_len,
+            log_every=log_every,
+            description=description,
+            endpoint=endpoint,
+            expiration_minutes=expiration_minutes
+        )
+
+    def layer2(self,
+               base: str,
+               quote: str,
+               data: dict,
+               mode: str,
+               ha_trend: int
+               ):
+        """ Connect to layer 2 and inference to specific model.
+
+            Parameters
+            ----------
+            base: `str`
+                The base symbol of the ticker.
+            quote: `str`
+                The quote symbol of the ticker.
+            data: `dict`
+                Dictionary containing list of klines.
+            mode: `str`
+            ha_trend: `int`
+
+            Returns
+            -------
+            `(float, int, int, str, str)`
+                If prediction is successful it will return the
+                percentage spread, direction, the number of n-tick
+                predicted forward, the base pair and the quote pair.
+        """
+        # use the cloud function predictor (old/prod model)
+        if self.kaiforecast_version is None:
+            reg_result = predict(
+                endpoint=self.endpoint, base=base, quote=quote, data=data)
+            if not reg_result: return None, None, None, base, quote
+            pred = reg_result['predictions']
+
+            # use the SUPER_TREND_SQUEEZE method
+            #if 'percentage_arr' not in pred: return None, None, None, base, quote
+            #_spread, _direction = self.select_direction(pred['percentage_arr'])
+            _spread = float(pred['percentage_spread'])
+            _direction = int(pred['direction'])
+            _n_ticks = int(pred['n_tick_forward'])
+        # use the cloud run predictor (latest/dev model)
+        else:
+            reg_result = predict_cloud_run_regression(
+                mode=mode,
+                kaiforecast_version=self.kaiforecast_version,
+                base=base,
+                quote=quote,
+                data=data,
+                timeframe=self.model_timeframe,
+                ha_trend=ha_trend
+            )
+            # if prediction fails return nones
+            if not reg_result: return None, None, None, base, quote
+            _spread = reg_result['predictions']['percentage_spread']
+            _direction = reg_result['predictions']['direction']
+            _n_ticks = reg_result['predictions']['n_tick_forward']
+        return _spread, _direction, _n_ticks, base, quote
+
+
+class HeikinAshiHybrid(HeikinAshiBase):
+    """ Heikin Ashi Hybrid strategy implementation
+        will scout for potential actionable
+        intelligence based on a specific market behavior.
+    """
+    def __init__(self,
+                 mode: str,
+                 kaiforecast_version: Optional[str],
+                 classification_threshold: float,
+                 long_spread: float,
+                 short_spread: float,
+                 long_ttp: float,
+                 short_ttp: float,
+                 pairs: dict,
+                 ha_timeframe: str,
+                 model_timeframe: str,
+                 ha_ema_len: int,
+                 log_every: int,
+                 expiration_minutes: Optional[Union[int, float]] = None):
+        description = "Heikin-Ashi Buy and Sell Strategy by Coinsspor for " \
+                      "Hybrid Model (Regression and Classification)"
+        super(HeikinAshiHybrid, self).__init__(
+            name=str(StrategyType.HEIKIN_ASHI_HYBRID),
+            strategy=StrategyType.HEIKIN_ASHI_HYBRID,
+            mode=mode,
+            kaiforecast_version=kaiforecast_version,
+            long_spread=long_spread,
+            long_ttp=long_ttp,
+            short_spread=short_spread,
+            short_ttp=short_ttp,
+            pairs=pairs,
+            ha_timeframe=ha_timeframe,
+            model_timeframe=model_timeframe,
+            ha_ema_len=ha_ema_len,
+            log_every=log_every,
+            description=description,
+            expiration_minutes=expiration_minutes
+        )
+        self.classification_threshold = classification_threshold
+        if self.kaiforecast_version is None:
+            raise ValueError(f"Please input the kaiforecast version!")
+
+    def layer2(self,
+               base: str,
+               quote: str,
+               data: dict,
+               mode: str,
+               ha_trend: int
+               ):
+        """ Connect to layer 2 and inference to specific model.
+
+            Parameters
+            ----------
+            base: `str`
+                The base symbol of the ticker.
+            quote: `str`
+                The quote symbol of the ticker.
+            data: `dict`
+                Dictionary containing list of klines.
+            mode: `str`
+            ha_trend: `int`
+
+            Returns
+            -------
+            `(float, int, int, str, str)`
+                If prediction is successful it will return the
+                percentage spread, direction, the number of n-tick
+                predicted forward, the base pair and the quote pair.
+        """
+        reg_result, cls_result = predict_cloud_run(
+            mode=mode,
+            kaiforecast_version=self.kaiforecast_version,
+            base=base,
+            quote=quote,
+            data=data,
+            timeframe=self.model_timeframe,
+            ha_trend=ha_trend
+        )
+        # if prediction fails return nones
+        if not reg_result and not cls_result:
+            return None, None, None, base, quote
+        else:
+            cls_prob = cls_result['predictions']
+            if (
+                    # cls_prob[0] > cls_prob[1] and
+                    cls_prob[0] > self.classification_threshold):
+                _spread = reg_result['predictions']['percentage_spread']
+                _direction = reg_result['predictions']['direction']
+                _n_ticks = reg_result['predictions']['n_tick_forward']
+                return _spread, _direction, _n_ticks, base, quote
+            else:
+                return None, None, None, base, quote
+
+
 class SuperTrendSqueeze(Strategy):
     """ SuperTrend Squeeze strategy implementation
         will scout for potential actionable
@@ -549,7 +717,8 @@ class SuperTrendSqueeze(Strategy):
                  short_spread: float,
                  short_ttp: float,
                  pairs: dict,
-                 log_every: int):
+                 log_every: int,
+                 expiration_minutes: Optional[Union[int, float]] = None):
         """ Initialize SuperTrendSqueeze class with specified spread & take profit
             percentage thresholds.
 
@@ -580,7 +749,9 @@ class SuperTrendSqueeze(Strategy):
             short_spread=short_spread,
             short_ttp=short_ttp,
             pairs=pairs,
-            log_every=log_every)
+            log_every=log_every,
+            expiration_minutes=expiration_minutes
+        )
         # in this class we will be using
         # lazybear's momentum squeeze, ema 99
         # supertrend and sma for technical analysis
@@ -703,7 +874,10 @@ class SuperTrendSqueeze(Strategy):
             last_price=float(last_price),
             direction=_direction,
             callback=callback,
-            n_tick_forward=_n_tick) if signal else None
+            n_tick_forward=_n_tick,
+            expiration_minutes=self.expiration_minutes
+        ) if signal else None
+
 
 class MaxDrawdownSpread(Strategy):
     """ Maxdrawdown Spread strategy implementation
@@ -720,7 +894,8 @@ class MaxDrawdownSpread(Strategy):
                  short_max_drawdown: float,
                  pairs: dict,
                  log_every: int,
-                 buffer: int):
+                 buffer: int,
+                 expiration_minutes: Optional[Union[int, float]] = None):
         """ Initialize MaxDrawdownSpread class with specified minimum spread, 
             take profit percentage thresholds and max drawdowns.
 
@@ -757,7 +932,8 @@ class MaxDrawdownSpread(Strategy):
             short_spread=short_spread,
             short_ttp=short_ttp,
             pairs=pairs,
-            log_every=log_every
+            log_every=log_every,
+            expiration_minutes=expiration_minutes
         )
         # in this class we will be using maximum drawdowns
         # as the main algorithmic approach from layer 2 predictions
@@ -853,7 +1029,9 @@ class MaxDrawdownSpread(Strategy):
             last_price=float(last_price),
             direction=_direction,
             callback=callback,
-            n_tick_forward=_n_tick) if signal else None
+            n_tick_forward=_n_tick,
+            expiration_minutes=self.expiration_minutes
+        ) if signal else None
 
 
 class MaxDrawdownSuperTrendSpread(Strategy):
@@ -871,7 +1049,8 @@ class MaxDrawdownSuperTrendSpread(Strategy):
                  short_max_drawdown: float,
                  pairs: dict,
                  log_every: int,
-                 buffer: int):
+                 buffer: int,
+                 expiration_minutes: Optional[Union[int, float]] = None):
         """ Initialize MaxDrawdownSuperTrendSpread class with specified 
             minimum spread, take profit percentage thresholds and max 
             drawdowns.
@@ -909,7 +1088,8 @@ class MaxDrawdownSuperTrendSpread(Strategy):
             short_spread=short_spread,
             short_ttp=short_ttp,
             pairs=pairs,
-            log_every=log_every
+            log_every=log_every,
+            expiration_minutes=expiration_minutes
         )
         # in this class we will be using maximum drawdowns
         # as the main algorithmic approach from layer 2 predictions
@@ -1024,7 +1204,10 @@ class MaxDrawdownSuperTrendSpread(Strategy):
             last_price=float(last_price),
             direction=_direction,
             callback=callback,
-            n_tick_forward=_n_tick) if signal else None
+            n_tick_forward=_n_tick,
+            expiration_minutes=self.expiration_minutes
+        ) if signal else None
+
 
 class MaxDrawdownSqueeze(Strategy):
     """ Maxdrawdown Squeeze strategy implementation
@@ -1040,7 +1223,8 @@ class MaxDrawdownSqueeze(Strategy):
                  short_ttp: float,
                  short_max_drawdown: float,
                  pairs: dict,
-                 log_every: int):
+                 log_every: int,
+                 expiration_minutes: Optional[Union[int, float]] = None):
         """ Initialize MaxDrawdownSqueeze class with specified spread, take profit
             percentage thresholds and max drawdowns.
 
@@ -1075,7 +1259,8 @@ class MaxDrawdownSqueeze(Strategy):
             short_spread=short_spread,
             short_ttp=short_ttp,
             pairs=pairs,
-            log_every=log_every
+            log_every=log_every,
+            expiration_minutes=expiration_minutes
         )
         # in this class we will be using maximum drawdowns
         # as the main algorithmic approach from layer 2 predictions
@@ -1165,7 +1350,9 @@ class MaxDrawdownSqueeze(Strategy):
             last_price=float(last_price),
             direction=_direction,
             callback=callback,
-            n_tick_forward=_n_tick) if signal else None
+            n_tick_forward=_n_tick,
+            expiration_minutes=self.expiration_minutes
+        ) if signal else None
 
 
 __REGISTRY = {
@@ -1173,8 +1360,10 @@ __REGISTRY = {
     str(StrategyType.MAX_DRAWDOWN_SQUEEZE): MaxDrawdownSqueeze,
     str(StrategyType.MAX_DRAWDOWN_SPREAD): MaxDrawdownSpread,
     str(StrategyType.MAX_DRAWDOWN_SUPER_TREND_SPREAD): MaxDrawdownSuperTrendSpread,
-    str(StrategyType.HEIKIN_ASHI_COINSSPOR): HeikinAshiCoinsspor
+    str(StrategyType.HEIKIN_ASHI_HYBRID): HeikinAshiHybrid,
+    str(StrategyType.HEIKIN_ASHI_REGRESSION): HeikinAshiRegression
 }
+
 
 def get_strategy(strategy: StrategyType) -> Union[Strategy, None]:
     """ A helper function that will retrieve the strategy class from `string_id` 

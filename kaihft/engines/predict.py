@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Union, Optional
 import requests, json, logging
 import google.auth.transport.requests
 import os
@@ -61,7 +61,7 @@ def predict(endpoint: str, base: str, quote: str, data: dict) -> Union[dict, Non
         >>> [
         ...    'open', 'high', 'low', 'close', 'volume', 'close_time',
         ...    'quote_asset_volume','number_of_trades','taker_buy_asset_vol',
-        ...    'taker_buy_quote_vol','datetime','ticker','interval', 'timeframe
+        ...    'taker_buy_quote_vol','datetime','ticker','interval', 'timeframe'
         ... ]
             
         `data` should be formatted as follows
@@ -124,8 +124,8 @@ def predict(endpoint: str, base: str, quote: str, data: dict) -> Union[dict, Non
     result = requests.post(model_url, data=json.dumps(params), headers=headers)
     if result.status_code == 200 and result.content:
         return json.loads(result.content)
-    logging.warn(f"[predict] failed inferencing to layer 2, "
-        f"status-code:{result.status_code}, symbol: {base}{quote}")
+    logging.warn(f"[predict] failed inferencing to layer 2, status-code: "
+                 f"{result.status_code}, symbol: {base}{quote}, content: {result.content}")
     return None
 
 
@@ -135,7 +135,8 @@ def predict_cloud_run(base: str,
                       mode: str,
                       kaiforecast_version: str,
                       ha_trend: int,
-                      timeframe: str = '1m') -> Tuple[dict, dict]:
+                      timeframe: str = '1m'
+                      ) -> Tuple[Optional[dict], Optional[dict]]:
     """ Function to perform prediction using regression and classification TFT models served on Google
         Cloud Run. The data is similar to the predict function.
 
@@ -158,7 +159,7 @@ def predict_cloud_run(base: str,
 
         Returns
         -------
-        `Tuple[dict, dict]`
+        `Tuple[Optional[dict], Optional[dict]]`
             A dictionary containing forecasted percentage spread
             of n-tick forward and the direction.
 
@@ -195,6 +196,7 @@ def predict_cloud_run(base: str,
         ...    }
 
     """
+    _kaiforecast_version = kaiforecast_version.replace(".", "-")
     if ha_trend == 1:
         direction = 'long'
     elif ha_trend == -1:
@@ -203,9 +205,9 @@ def predict_cloud_run(base: str,
         direction = None
 
     if direction is not None:
-        cls_endpoint = f"https://{mode}-{kaiforecast_version}---"\
+        cls_endpoint = f"https://{mode}-{_kaiforecast_version}---"\
                        f"{base.lower()}-predict-classification-{direction}-{timeframe}-wvgsvdm4ya-uc.a.run.app"
-        reg_endpoint = f"https://{mode}-{kaiforecast_version}---"\
+        reg_endpoint = f"https://{mode}-{_kaiforecast_version}---"\
                        f"{base.lower()}-predict-regression-{timeframe}-wvgsvdm4ya-uc.a.run.app"
 
         # inference regression
@@ -240,3 +242,92 @@ def predict_cloud_run(base: str,
 
     else:
         return None, None
+
+
+def predict_cloud_run_regression(base: str,
+                                 quote: str,
+                                 data: dict,
+                                 mode: str,
+                                 kaiforecast_version: str,
+                                 ha_trend: int,
+                                 timeframe: str = '1m'
+                                 ) -> Optional[dict]:
+    """ Function to perform prediction using regression TFT models,
+        served on Google Cloud Run.
+        The data is similar to the predict function.
+
+        Parameters
+        ----------
+        base: `str`
+            the pair's base
+        quote: `str`
+            the pair's quote
+        data: `dict`
+            the data as the input into the model
+        mode: `str`
+            prod or dev
+        kaiforecast_version: `str`
+            kaiforecast version used. Necessary for the cloud run
+        ha_trend: `int`
+            current heikin ashi trend, to determine long and short
+        timeframe: `str`
+            timeframe used for the model
+
+        Returns
+        -------
+        `Optional[dict]`
+            A dictionary containing forecasted percentage spread
+            of n-tick forward and the direction.
+
+        Example
+        -------
+        Regression output
+        >>> {
+        ...        'base': 'UNI',                               # base pair
+        ...        'interval': '15m',                           # interval timeframe
+        ...        'predictions': {
+        ...            'direction': 0,                          # 1 = long and 0 = short
+        ...            'n_tick_forward': 4,                     # forecasted n forward
+        ...            'percentage_arr': [                      # series predictions
+        ...                -0.29120445251464844,
+        ...                -0.30862805247306824,
+        ...                -0.3237372040748596,
+        ...                -0.3499438464641571
+        ...            ],
+        ...            'percentage_spread': 0.3499438464641571  # spread in percentage
+        ...       },
+        ...        'quote': 'USDT',                             # quote pair
+        ...        'success': True,                             # validator
+        ...        'timestamp': 1639512483.083822               # utc timestamp
+        ...    }
+    """
+    _kaiforecast_version = kaiforecast_version.replace(".", "-")
+    if ha_trend == 1:
+        direction = 'long'
+    elif ha_trend == -1:
+        direction = 'short'
+    else:
+        direction = None
+
+    if direction is not None:
+        reg_endpoint = f"https://{mode}-{_kaiforecast_version}---" \
+                       f"{base.lower()}-predict-regression-{timeframe}-" \
+                       f"wvgsvdm4ya-uc.a.run.app"
+
+        # inference regression
+        # id_token = fetch_id_token(audience=reg_endpoint)
+        id_token = os.popen('gcloud auth print-identity-token').read().strip()
+        headers = {"Authorization": f'bearer {id_token}', "content-type": 'application/json'}
+        params = dict(instances=dict(data=data))
+        reg_result = requests.post(reg_endpoint, data=json.dumps(params), headers=headers)
+
+        if reg_result.status_code == 200 and reg_result.content:
+            reg_result = reg_result.json()
+        else:
+            logging.warning(f"[predict] failed inferencing to layer 2 regression model, "
+                            f"status-code:{reg_result.status_code}, symbol: {base}{quote}")
+            return None
+
+        return reg_result
+    else:
+        return None
