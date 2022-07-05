@@ -450,7 +450,7 @@ class SignalEngine():
                     # begin update to signal object
                     price_type = 'mark_price' if 'mark_price' in data else 'last_price'
                     last_price = float(data[price_type]) 
-                    # update signal with the lastest price
+                    # update signal with the latest price
                     self.signals[symbol].update(last_price)
 
             if self.ticker_counts % self.log_every == 0:

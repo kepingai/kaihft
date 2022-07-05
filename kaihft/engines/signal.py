@@ -12,6 +12,7 @@ class SignalStatus(Enum):
     CLOSED = "CLOSED"
     COMPLETED = "COMPLETED"
     EXPIRED = "EXPIRED"
+    STOPPED = "STOPPED"
     
     def __str__(self):
         return str(self.value)
@@ -41,7 +42,8 @@ class Signal():
                  created_at: int = None,
                  expired_at: int = None,
                  status: SignalStatus = SignalStatus.NEW,
-                 expiration_minutes: Optional[Union[int, float]] = None):
+                 expiration_minutes: Optional[Union[int, float]] = None,
+                 stop_loss: Optional[float] = None):
         """ Initializing a signal class.
 
             Parameters
@@ -79,6 +81,8 @@ class Signal():
             expiration_minutes: `Optional[Union[int, float]]`
                 The expiration duration in minutes, if None: use the expiration
                 calculation using the n_tick_forward and buffer.
+            stop_loss: `Optional[float]`
+                The stop loss in percentage.
         """
         self.id = id if id else str(uuid.uuid4())
         self.base = base
@@ -87,8 +91,8 @@ class Signal():
         self.take_profit = take_profit
         self.spread = spread
         self.purchase_price = purchase_price
-        mult = (1 + (take_profit / 100)) if direction == 1 else (1 - (take_profit / 100))
-        self.exit_price = purchase_price * mult
+        tp = (1 + (take_profit / 100)) if direction == 1 else (1 - (take_profit / 100))
+        self.exit_price = purchase_price * tp
         self.last_price = last_price
         self.direction = direction
         self.n_tick_forward = n_tick_forward
@@ -98,12 +102,19 @@ class Signal():
         self.realized_profit = realized_profit
         if expiration_minutes is None:
             expiration_minutes = (45 * (n_tick_forward + buffer))
+        if stop_loss is None:
+            self.stop_price = None
+        else:
+            sl = (1 - (stop_loss / 100)) if direction == 1 else (
+                        1 + (stop_loss / 100))
+            self.stop_price = purchase_price * sl
         self.created_at = datetime.utcnow().timestamp() if not created_at else created_at
         self.expired_at = ((datetime.fromtimestamp(self.created_at) + timedelta(
             minutes=expiration_minutes)).timestamp()
             if not expired_at else expired_at)
+        add_log = f", stop loss: {stop_loss}" if stop_loss else ""
         logging.info(f"[signal] created! symbol:{self.symbol}, "
-            f"spread: {self.spread}, ttp: {self.take_profit}, direction: {self.direction}")
+            f"spread: {self.spread}, ttp: {self.take_profit}, direction: {self.direction}{add_log}")
         self.open()
     
     @property
@@ -148,31 +159,42 @@ class Signal():
         # this will prevent duplicate runs
         self._status = SignalStatus.UPDATING
         self.last_price = last_price
-        # if last price have gone above the exit price
-        if self.direction == 1 and last_price >= self.exit_price:
-            self.realized_profit = round(abs(self.last_price - 
-                self.purchase_price) / self.purchase_price * 100, 4)
-            logging.info(f"[completed] signal - symbol: {self.symbol}, "
-                f"direction: {self.direction}, realized-profit: {self.realized_profit}%")
-            self._status = SignalStatus.COMPLETED
-            self.callback(self)
-        # if last price have gone above the exit price
-        elif self.direction == 0 and last_price <= self.exit_price:
-            self.realized_profit = round(abs(self.last_price - 
-                self.purchase_price) / self.purchase_price * 100, 4)
+        # TODO: add update by change in ha direction
+        # if last price have gone above the exit price (LONG position profit)
+        # or below (SHORT position profit)
+        if (self.direction == 1 and last_price >= self.exit_price) or \
+                (self.direction == 0 and last_price <= self.exit_price):
+            self.calculate_realized_profit()
             logging.info(f"[completed] signal - symbol: {self.symbol}, "
                 f"direction: {self.direction}, realized-profit: {self.realized_profit}%")
             self._status = SignalStatus.COMPLETED
             self.callback(self)
         # check if time has surpassed expected expired date
         elif datetime.utcnow().timestamp() >= self.expired_at:
+            self.calculate_realized_profit()
             self._status = SignalStatus.EXPIRED
             logging.info(f"[expired] signal - symbol: {self.symbol}, "
-                f"direction: {self.direction}, expiration: {self.expired_at}")
-            self.callback(self) 
+                f"direction: {self.direction}, expiration: {self.expired_at}, "
+                f"realized-spread: {self.realized_profit}%")
+            self.callback(self)
+        # if last price have gone below the stop price (LONG position stop loss)
+        elif self.stop_price is not None and (
+                (self.direction == 1 and last_price <= self.stop_price) or
+                (self.direction == 0 and last_price >= self.stop_price)):
+            self.calculate_realized_profit()
+            logging.info(f"[stopped] signal - symbol: {self.symbol}, "
+                f"direction: {self.direction}, loss: {self.realized_profit}%")
+            self._status = SignalStatus.STOPPED
+            self.callback(self)
         # signal is updated and back to open
         else: self.open()
         return self._status
+
+    def calculate_realized_profit(self):
+        """ Calculate the realized profit of a closed signal. """
+        multiplier = 1 if self.direction == 1 else -1
+        spread = (self.last_price - self.purchase_price) / self.purchase_price * 100 * multiplier
+        self.realized_profit = round(spread, 4)
 
     def to_dict(self) -> dict:
         """ Returns
