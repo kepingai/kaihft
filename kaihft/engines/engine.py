@@ -435,6 +435,7 @@ class SignalEngine():
             message: `pubsub_v1.subscriber.message.Message`
                 The message from Cloud pub/sub.
         """
+        current_trend = None
         if message.attributes and 'timestamp' in message.attributes:
             # get the attributes of the message
             symbol = message.attributes.get("symbol")
@@ -451,7 +452,10 @@ class SignalEngine():
                     price_type = 'mark_price' if 'mark_price' in data else 'last_price'
                     last_price = float(data[price_type]) 
                     # update signal with the latest price
-                    self.signals[symbol].update(last_price)
+                    # TODO: impose the heikin-ashi direction here if needed!
+                    if 'HEIKIN_ASHI' in str(self.strategy_type):
+                        current_trend = self.strategy.ha_trend
+                    self.signals[symbol].update(last_price, current_trend)
 
             if self.ticker_counts % self.log_every == 0:
                 logging.info(f"[ticker] cloud pub/sub messages running, "
