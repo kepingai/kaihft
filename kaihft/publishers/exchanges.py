@@ -307,7 +307,7 @@ class BinanceUSDMKlinesPublisher(BaseTickerKlinesPublisher):
             last_init = time.time() - start
             if last_init >= self.restart_every:
                 raise RestartPodException(f"Restarting the pod regularly every "
-                                          f"{self.restart_every} minute(s)!")
+                                          f"{round(last_init, 2)} minute(s)!")
             # get and remove the oldest entry from the `stream_buffer` stack
             oldest_stream_data_from_stream_buffer = self.websocket.pop_stream_data_from_stream_buffer(mode='LIFO')
 
