@@ -141,7 +141,8 @@ class Signal():
         """
         return self._status == SignalStatus.OPEN
         
-    def update(self, last_price: float) -> SignalStatus:
+    def update(self, last_price: float, ha_direction: Optional[int] = None
+               ) -> SignalStatus:
         """ Will update the signal's status based upon the current
             last price of the ticker.
 
@@ -149,6 +150,8 @@ class Signal():
             ----------
             last_price: `float`
                 The last price of the ticker.
+            ha_direction: `Optional[int]`, default is None
+                The heikin-ashi smoothed trend/direction (e.g., 1, 0 or -1)
             
             Returns
             -------
@@ -159,20 +162,30 @@ class Signal():
         # this will prevent duplicate runs
         self._status = SignalStatus.UPDATING
         self.last_price = last_price
-        # TODO: add update by change in ha direction
+        # TODO: test the update/stop_loss by change in ha direction
+        # if the heikin-ashi direction differs from the signal direction,
+        # proceed to close the signal as a stop loss (STOPPED)
+        if ha_direction is not None:
+            if (self.direction == 1 and ha_direction == -1) or \
+                    (self.direction == 0 and ha_direction == 1):
+                self.update_realized_profit(status=SignalStatus.STOPPED)
+                logging.info(f"[ha-stopped] signal - symbol: {self.symbol}, "
+                             f"direction: {self.direction}, realized-spread: "
+                             f"{self.realized_profit}%")
+                self.callback(self)
+                return self._status
+
         # if last price have gone above the exit price (LONG position profit)
         # or below (SHORT position profit)
         if (self.direction == 1 and last_price >= self.exit_price) or \
                 (self.direction == 0 and last_price <= self.exit_price):
-            self.calculate_realized_profit()
+            self.update_realized_profit(status=SignalStatus.COMPLETED)
             logging.info(f"[completed] signal - symbol: {self.symbol}, "
                 f"direction: {self.direction}, realized-profit: {self.realized_profit}%")
-            self._status = SignalStatus.COMPLETED
             self.callback(self)
         # check if time has surpassed expected expired date
         elif datetime.utcnow().timestamp() >= self.expired_at:
-            self.calculate_realized_profit()
-            self._status = SignalStatus.EXPIRED
+            self.update_realized_profit(status=SignalStatus.EXPIRED)
             logging.info(f"[expired] signal - symbol: {self.symbol}, "
                 f"direction: {self.direction}, expiration: {self.expired_at}, "
                 f"realized-spread: {self.realized_profit}%")
@@ -181,20 +194,26 @@ class Signal():
         elif self.stop_price is not None and (
                 (self.direction == 1 and last_price <= self.stop_price) or
                 (self.direction == 0 and last_price >= self.stop_price)):
-            self.calculate_realized_profit()
+            self.update_realized_profit(status=SignalStatus.STOPPED)
             logging.info(f"[stopped] signal - symbol: {self.symbol}, "
                 f"direction: {self.direction}, loss: {self.realized_profit}%")
-            self._status = SignalStatus.STOPPED
             self.callback(self)
         # signal is updated and back to open
         else: self.open()
         return self._status
 
-    def calculate_realized_profit(self):
-        """ Calculate the realized profit of a closed signal. """
+    def update_realized_profit(self, status: SignalStatus):
+        """ Calculate the realized profit of a closed signal.
+
+            Parameters
+            ----------
+            status: `SignalStatus`
+                The updated status of the signal.
+        """
         multiplier = 1 if self.direction == 1 else -1
         spread = (self.last_price - self.purchase_price) / self.purchase_price * 100 * multiplier
         self.realized_profit = round(spread, 4)
+        self._status = status
 
     def to_dict(self) -> dict:
         """ Returns
