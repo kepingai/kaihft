@@ -1,4 +1,5 @@
 import logging
+from typing import Union
 from kaihft.publishers.exchanges import BinanceUSDMKlinesPublisher
 from kaihft.publishers.client import KaiPublisherClient
 from binance.client import Client
@@ -11,7 +12,8 @@ def main(
         n_klines: int,
         production: bool,
         timeframe: int,
-        topic_path: str = 'klines-binance-v0'):
+        topic_path: str = 'klines-binance-v0',
+        restart_every: Union[int, float] = 60):
     """ Retrieve real-time binance data via websocket &
         then publish binance klines to Cloud Pub/Sub.
 
@@ -25,6 +27,8 @@ def main(
             if `True` publisher will publish to production topic.
         topic_path: `str`
             The topic path to publish klines.
+        restart_every: `Union[int, float]`
+            Restart the klines pod every X minute(s), default is 60 minutes
     """
     # we stream mark price and all market pairs
     if timeframe < 60:
@@ -72,5 +76,7 @@ def main(
         n_klines=n_klines,
         timeframe=timeframe,
         database=database,
-        pairs_ref=pairs_ref)
+        pairs_ref=pairs_ref,
+        restart_every=restart_every
+    )
     klines_publisher.run()
