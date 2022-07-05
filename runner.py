@@ -81,12 +81,14 @@ def klines_binance_futures(klines, production, exp0a, exp1a):
 @click.option('--klines', default=250, help='the length of historical klines back.')
 @click.option('--production', is_flag=True, help='publish messages to production topic.')
 @click.option('--timeframe', default=15, help='market timeframe to stream')
+@click.option('--restart-every', '-r', default=60, help='restart the pod every X minute(s)')
 @notify_failure
-def klines_binance_usdm(klines, production, timeframe):
+def klines_binance_usdm(klines, production, timeframe, restart_every):
     services.klines_binance_usdm.main(
         n_klines=klines,
         production=production,
-        timeframe=timeframe)
+        timeframe=timeframe,
+        restart_every=restart_every)
 
 
 @cli.command()
