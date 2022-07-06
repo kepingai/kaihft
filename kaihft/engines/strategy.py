@@ -299,6 +299,8 @@ class HeikinAshiBase(Strategy):
             for p in v:
                 if p not in self.ha_trend:
                     self.ha_trend[p] = 0
+        logging.info(f"[strategy] [{str(strategy)}] initialized the heikin-"
+                     f"ashi trend, ha_trend: {self.ha_trend}")
 
     def scout(self,
               base: str,
