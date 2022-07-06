@@ -1,6 +1,6 @@
 import pandas as pd
 import time, json, logging, asyncio
-from typing import Dict
+from typing import Dict, Union
 from .client import KaiPublisherClient
 from enum import Enum
 from typing import Tuple
@@ -167,6 +167,7 @@ class BinanceUSDMKlinesPublisher(BaseTickerKlinesPublisher):
                  topic_path: str = 'klines-binance-v0',
                  n_klines: int = 250,
                  timeframe: int = 1,
+                 restart_every: Union[int, float] = 60
                  ):
         """ This class streams klines data from Binance websocket API
             for BinanceUSDM
@@ -187,6 +188,8 @@ class BinanceUSDMKlinesPublisher(BaseTickerKlinesPublisher):
                 the number of candles to publish
             timeframe: `int`
                 market timeframe in minutes. If using 1h, please input 60, etc
+            restart_every: `Union[int, float]`
+                restart the klines pod every X minute(s), default is 60 minutes
         """
         super(BinanceUSDMKlinesPublisher, self).__init__(
             name='BINANCEUSDM', websocket=websocket, stream_id=stream_id,
@@ -209,6 +212,9 @@ class BinanceUSDMKlinesPublisher(BaseTickerKlinesPublisher):
         self.database = database
         self.pairs_ref = pairs_ref
         self.listener_pairs = None
+        self.restart_every = (restart_every * 60) + 10  # store in seconds
+        logging.info(f"The binance-usdm {timeframe}min klines publisher will "
+                     f"be restarted every {restart_every} minute(s).")
 
         # initialize the market klines and status. Each time we get a new data, we will either update or replace the
         # latest value
@@ -291,11 +297,17 @@ class BinanceUSDMKlinesPublisher(BaseTickerKlinesPublisher):
             update it.
         """
         count = 0
+        start = time.time()
         while True:
             # binance spot will only allow 24h max stream
             # connection, this will automatically close the script
             if self.websocket.is_manager_stopping():
                 exit(0)
+            # regularly restarting the pod
+            last_init = time.time() - start
+            if last_init >= self.restart_every:
+                raise RestartPodException(f"Restarting the pod regularly every "
+                                          f"{round(last_init, 2)} minute(s)!")
             # get and remove the oldest entry from the `stream_buffer` stack
             oldest_stream_data_from_stream_buffer = self.websocket.pop_stream_data_from_stream_buffer(mode='LIFO')
 
