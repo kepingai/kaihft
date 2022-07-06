@@ -452,10 +452,11 @@ class SignalEngine():
                     price_type = 'mark_price' if 'mark_price' in data else 'last_price'
                     last_price = float(data[price_type]) 
                     # update signal with the latest price
-                    # TODO: impose the heikin-ashi direction here if needed!
+                    # and the local trend (if needed)
                     if 'HEIKIN_ASHI' in str(self.strategy_type):
-                        current_trend = self.strategy.ha_trend
+                        current_trend = self.strategy.ha_trend.get(symbol, None)
                     self.signals[symbol].update(last_price, current_trend)
+                    logging.critical(f"[debug] {symbol} --- ha_trend: {current_trend}")  # TODO - R: Test
 
             if self.ticker_counts % self.log_every == 0:
                 logging.info(f"[ticker] cloud pub/sub messages running, "
