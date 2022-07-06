@@ -654,9 +654,9 @@ class SignalEngine():
             # update the real-time database with newly updated dictionary
             self.set_enging_state()
             # update cooldown if signal completed
-            # TODO - Q: update cooldown for STOPPED and/or EXPIRED also?
-            if signal.status == SignalStatus.COMPLETED:
+            if signal.status in [SignalStatus.COMPLETED, SignalStatus.STOPPED]:
                 self.update_cooldown(signal.symbol)
+                logging.critical(f"[debug] {signal.symbol} - {signal.status} - update cooldown!")  # TODO - R/Q: Test. Update cooldown for STOPPED and/or EXPIRED also?
     
     def update_cooldown(self, symbol: str):
         """ Will update the cooldown counter and time of a symbol.
