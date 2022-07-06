@@ -453,7 +453,8 @@ class SignalEngine():
                     last_price = float(data[price_type]) 
                     # update signal with the latest price
                     # and the local trend (if needed)
-                    if 'HEIKIN_ASHI' in str(self.strategy_type):
+                    if 'HEIKIN_ASHI' in str(self.strategy_type) and \
+                            self.strategy_params.get("use_ha_stop_dir", False):
                         current_trend = self.strategy.ha_trend.get(symbol, None)
                     self.signals[symbol].update(last_price, current_trend)
                     logging.critical(f"[debug] {symbol} --- ha_trend: {current_trend}")  # TODO - R: Test
