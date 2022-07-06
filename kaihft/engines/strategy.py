@@ -287,13 +287,18 @@ class HeikinAshiBase(Strategy):
         self.ha_timeframe = ha_timeframe
         self.model_timeframe = model_timeframe
         self.ha_ema_len = ha_ema_len
-        self.ha_trend = 0
         self.mode = mode
         self.kaiforecast_version = kaiforecast_version
         logging.info(f"[strategy] [{str(strategy)}] run the {model_timeframe} "
                      f"strategy with kaiforecast {str(kaiforecast_version)}. "
                      f"[heikin-ashi] config --- timeframe: {ha_timeframe}, "
                      f"EMA length: {ha_ema_len}.")
+        # initialize the heikin-ashi trend dict
+        self.ha_trend = {}
+        for _, v in pairs.items():
+            for p in v:
+                if p not in self.ha_trend:
+                    self.ha_trend[p] = 0
 
     def scout(self,
               base: str,
@@ -336,14 +341,14 @@ class HeikinAshiBase(Strategy):
         open_price = clean_df.iloc[-1].open
         pair = f"{base}{quote}".upper()
 
-        if self.ha_trend == 1 and pair in self.pairs['long'] and last_price > open_price:
+        if self.ha_trend[pair] == 1 and pair in self.pairs['long'] and last_price > open_price:
             # inference to layer 2
             _spread, _direction, _n_tick, base, quote = self.layer2(
                 base=base,
                 quote=quote,
                 data=clean_df.to_dict('list'),
                 mode=self.mode,
-                ha_trend=self.ha_trend)
+                ha_trend=self.ha_trend[pair])
 
             if _spread is None or _direction is None: return None
             # ensure that spread is above threshold and direction matches.
@@ -354,14 +359,14 @@ class HeikinAshiBase(Strategy):
             self.save_metrics(start, f"{base}{quote}")
 
         # else if direction is short and squeeze is off and red candle
-        elif self.ha_trend == -1 and pair in self.pairs['short'] and last_price < open_price:
+        elif self.ha_trend[pair] == -1 and pair in self.pairs['short'] and last_price < open_price:
             # inference to layer 2
             _spread, _direction, _n_tick, base, quote = self.layer2(
                 base=base,
                 quote=quote,
                 data=clean_df.to_dict('list'),
                 mode=self.mode,
-                ha_trend=self.ha_trend
+                ha_trend=self.ha_trend[pair]
             )
 
             if _spread is None or _direction is None: return None
@@ -484,7 +489,7 @@ class HeikinAshiBase(Strategy):
                 # if True, it means the model can go long. If False, the model can go short
                 trend = np.array(np.array(mavi) > np.array(kirmizi))
 
-                self.ha_trend = 1 if np.all(trend[-2:]) else -1
+                self.ha_trend[symbol] = 1 if np.all(trend[-2:]) else -1
 
         # acknowledge the message
         message.ack()
