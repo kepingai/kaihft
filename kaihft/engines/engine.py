@@ -435,6 +435,7 @@ class SignalEngine():
             message: `pubsub_v1.subscriber.message.Message`
                 The message from Cloud pub/sub.
         """
+        current_trend = None
         if message.attributes and 'timestamp' in message.attributes:
             # get the attributes of the message
             symbol = message.attributes.get("symbol")
@@ -450,8 +451,13 @@ class SignalEngine():
                     # begin update to signal object
                     price_type = 'mark_price' if 'mark_price' in data else 'last_price'
                     last_price = float(data[price_type]) 
-                    # update signal with the lastest price
-                    self.signals[symbol].update(last_price)
+                    # update signal with the latest price
+                    # and the local trend (if needed)
+                    if 'HEIKIN_ASHI' in str(self.strategy_type) and \
+                            self.strategy_params.get("use_ha_stop_dir", False):
+                        current_trend = self.strategy.ha_trend.get(symbol, None)
+                    self.signals[symbol].update(last_price, current_trend)
+                    logging.critical(f"[debug] {symbol} --- ha_trend: {current_trend}")  # TODO - R: Test
 
             if self.ticker_counts % self.log_every == 0:
                 logging.info(f"[ticker] cloud pub/sub messages running, "
@@ -649,8 +655,9 @@ class SignalEngine():
             # update the real-time database with newly updated dictionary
             self.set_enging_state()
             # update cooldown if signal completed
-            if signal.status == SignalStatus.COMPLETED:
+            if signal.status in [SignalStatus.COMPLETED, SignalStatus.STOPPED]:
                 self.update_cooldown(signal.symbol)
+                logging.critical(f"[debug] {signal.symbol} - {signal.status} - update cooldown!")  # TODO - R/Q: Test. Update cooldown for STOPPED and/or EXPIRED also?
     
     def update_cooldown(self, symbol: str):
         """ Will update the cooldown counter and time of a symbol.

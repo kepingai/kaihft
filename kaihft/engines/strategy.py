@@ -294,13 +294,14 @@ class HeikinAshiBase(Strategy):
                      f"[heikin-ashi] config --- timeframe: {ha_timeframe}, "
                      f"EMA length: {ha_ema_len}.")
         # initialize the heikin-ashi trend dict
-        self.ha_trend = {}
+        self.ha_trend, self.ha_candle = {}, {}
         for _, v in pairs.items():
             for p in v:
-                if p not in self.ha_trend:
-                    self.ha_trend[p] = 0
+                if p not in self.ha_trend: self.ha_trend[p] = 0
+                if p not in self.ha_candle: self.ha_candle[p] = 0
         logging.info(f"[strategy] [{str(strategy)}] initialized the heikin-"
-                     f"ashi trend, ha_trend: {self.ha_trend}")
+                     f"ashi trend and candle, ha_trend: {self.ha_trend}, "
+                     f"ha_candle: {self.ha_candle}")
 
     def scout(self,
               base: str,
@@ -343,15 +344,16 @@ class HeikinAshiBase(Strategy):
         open_price = clean_df.iloc[-1].open
         pair = f"{base}{quote}".upper()
 
-        if self.ha_trend[pair] == 1 and pair in self.pairs['long'] and last_price > open_price:
+        if self.ha_trend[pair] == 1 and self.ha_candle[pair] == 1 \
+                and pair in self.pairs['long'] and last_price > open_price:
             # inference to layer 2
             _spread, _direction, _n_tick, base, quote = self.layer2(
                 base=base,
                 quote=quote,
                 data=clean_df.to_dict('list'),
                 mode=self.mode,
-                ha_trend=self.ha_trend[pair])
-
+                ha_trend=self.ha_trend[pair]
+            )
             if _spread is None or _direction is None: return None
             # ensure that spread is above threshold and direction matches.
             if _spread >= self.long_spread and _direction == 1:
@@ -361,7 +363,8 @@ class HeikinAshiBase(Strategy):
             self.save_metrics(start, f"{base}{quote}")
 
         # else if direction is short and squeeze is off and red candle
-        elif self.ha_trend[pair] == -1 and pair in self.pairs['short'] and last_price < open_price:
+        elif self.ha_trend[pair] == -1 and self.ha_candle[pair] == -1 \
+                and pair in self.pairs['short'] and last_price < open_price:
             # inference to layer 2
             _spread, _direction, _n_tick, base, quote = self.layer2(
                 base=base,
@@ -370,7 +373,6 @@ class HeikinAshiBase(Strategy):
                 mode=self.mode,
                 ha_trend=self.ha_trend[pair]
             )
-
             if _spread is None or _direction is None: return None
             # ensure that spread is above threshold and direction matches.
             if _spread >= self.short_spread and _direction == 0:
@@ -438,6 +440,10 @@ class HeikinAshiBase(Strategy):
                 heikin_ashi_klines = ha_dataframe.ta.ha()
                 heikin_ashi_klines = heikin_ashi_klines.rename(
                     columns={'HA_open': 'open', 'HA_high': 'high', 'HA_low': 'low', 'HA_close': 'close'})
+
+                # get the latest heikin-ashi candle of the specific symbol
+                ha_candles = heikin_ashi_klines["close"] - heikin_ashi_klines["open"]
+                self.ha_candle[symbol] = 1 if ha_candles.iloc[-1] > 0 else -1
 
                 # start calculation. See tradingview for reference
                 hac = pd.DataFrame((ohlc4 + heikin_ashi_klines['open'].fillna(0)

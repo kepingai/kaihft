@@ -76,6 +76,10 @@ def main(exchange: str,
         params.update({"ha_klines": dict(id=heikin_ashi_topic_path, timeout=timeout)})
         strategy_params.update({"heikin_ashi_subscriber": heikin_ashi_subscriber,
                                 "mode": path})
+        if "use_ha_stop_dir" in strategy_params:
+            if strategy_params["use_ha_stop_dir"]:
+                logging.info(f"[signal-{version}] [{exchange}] use the heikin-"
+                             f"ashi STOP loss on direction change!")
     logging.info(f"[signal-{version}] [{exchange}] subscription params: {params}.")
     logging.info(f"[signal-{version}] [{exchange}] strategy params: {strategy_params}.")
 
