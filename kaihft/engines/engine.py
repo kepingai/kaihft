@@ -457,7 +457,6 @@ class SignalEngine():
                             self.strategy_params.get("use_ha_stop_dir", False):
                         current_trend = self.strategy.ha_trend.get(symbol, None)
                     self.signals[symbol].update(last_price, current_trend)
-                    logging.critical(f"[debug] {symbol} --- ha_trend: {current_trend}")  # TODO - R: Test
 
             if self.ticker_counts % self.log_every == 0:
                 logging.info(f"[ticker] cloud pub/sub messages running, "
@@ -657,7 +656,6 @@ class SignalEngine():
             # update cooldown if signal completed
             if signal.status in [SignalStatus.COMPLETED, SignalStatus.STOPPED]:
                 self.update_cooldown(signal.symbol)
-                logging.critical(f"[debug] {signal.symbol} - {signal.status} - update cooldown!")  # TODO - R/Q: Test. Update cooldown for STOPPED and/or EXPIRED also?
     
     def update_cooldown(self, symbol: str):
         """ Will update the cooldown counter and time of a symbol.

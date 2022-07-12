@@ -162,7 +162,6 @@ class Signal():
         # this will prevent duplicate runs
         self._status = SignalStatus.UPDATING
         self.last_price = last_price
-        # TODO: test the update/stop_loss by change in ha direction
         # if the heikin-ashi direction differs from the signal direction,
         # proceed to close the signal as a stop loss (STOPPED)
         if ha_direction is not None:
