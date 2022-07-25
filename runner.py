@@ -44,13 +44,15 @@ def ticker_binance_spot(production):
 @click.option('--production', is_flag=True, help='publish messages to production topic.')
 @click.option('--exp0a', is_flag=True, help='publish & subscribe messages to exp0a topic.')
 @click.option('--exp1a', is_flag=True, help='publish & subscribe messages to exp1a topic.')
+@click.option('--restart-every', '-r', default=60, help='restart the pod every X minute(s)')
 @notify_failure
-def ticker_binance_futures(production, exp0a, exp1a):
+def ticker_binance_futures(production, exp0a, exp1a, restart_every):
     services.ticker_binance_futures.main(
         markets=__MARKETS,
         production=production,
         exp0a=exp0a,
-        exp1a=exp1a)
+        exp1a=exp1a,
+        restart_every=restart_every)
 
 @cli.command()
 @click.option('--klines', default=250, help='the length of historical klines back.')

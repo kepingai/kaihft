@@ -307,7 +307,7 @@ class BinanceUSDMKlinesPublisher(BaseTickerKlinesPublisher):
             last_init = time.time() - start
             if last_init >= self.restart_every:
                 raise RestartPodException(f"Restarting the pod regularly every "
-                                          f"{round(last_init, 2)} minute(s)!")
+                                          f"{round(last_init/60, 2)} minute(s)!")
             # get and remove the oldest entry from the `stream_buffer` stack
             oldest_stream_data_from_stream_buffer = self.websocket.pop_stream_data_from_stream_buffer(mode='LIFO')
 
@@ -943,11 +943,13 @@ class BinanceSpotTickerPublisher(BaseTickerKlinesPublisher):
 class BinanceTickerPublisher(BaseTickerKlinesPublisher):
     """ Binance ticker publisher class."""
     def __init__(self,
-            websocket: BinanceWebSocketApiManager,
-            stream_id: str,
-            publisher: KaiPublisherClient,
-            quotes: list = ["USDT"],
-            topic_path: str = 'ticker-binance-v0'):
+                 websocket: BinanceWebSocketApiManager,
+                 stream_id: str,
+                 publisher: KaiPublisherClient,
+                 quotes: list = ["USDT"],
+                 topic_path: str = 'ticker-binance-v0',
+                 restart_every: Union[int, float] = 60
+                 ):
         """ Publish ticker data to defined topic. 
 
             Parameters
@@ -962,17 +964,22 @@ class BinanceTickerPublisher(BaseTickerKlinesPublisher):
                 A list containing allowed quotes.
             topic_path: `str`
                 The topic path to publish data.
+            restart_every: `Union[int, float]`
+                restart the ticker pod every X minute(s), default is 60 minutes
         """
         super(BinanceTickerPublisher, self).__init__(
             name='BINANCE', websocket=websocket, stream_id=stream_id,
             publisher=publisher, topic_path=topic_path, quotes=quotes)
+        self.restart_every = (restart_every * 60) + 10  # store in seconds
+        logging.info(f"The binance-usdm ticker publisher will "
+                     f"be restarted every {restart_every} minute(s).")
 
     def run(self):
         """ Load,format data from websocket manager & publish
             it to the topic specified during initialization.
         """
         count = 0
-        start = time.time()
+        start, start_init = time.time(), time.time()
         while True:
             # binance spot will only allow 24h max stream
             # connection, this will automatically close the script
@@ -981,6 +988,11 @@ class BinanceTickerPublisher(BaseTickerKlinesPublisher):
             if self.websocket.is_manager_stopping() or last_published >= 30: 
                 raise RestartPodException(f"Websocket manager stopped, last message "
                     f"published: {round(last_published, 2)} seconds ago, restarting pod!")
+            # regularly restarting the pod
+            last_init = time.time() - start_init
+            if last_init >= self.restart_every:
+                raise RestartPodException(f"Restarting the pod regularly every "
+                                          f"{round(last_init/60, 2)} minute(s)!")
             # get and remove the oldest entry from the `stream_buffer` stack
             oldest_stream_data_from_stream_buffer = self.websocket.pop_stream_data_from_stream_buffer()
             if oldest_stream_data_from_stream_buffer is False: time.sleep(0.01)
