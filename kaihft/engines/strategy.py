@@ -14,6 +14,7 @@ from google.cloud import pubsub_v1
 import json
 import os
 import requests
+from kaihft.alerts.exceptions import RestartPodException
 
 
 class StrategyType(Enum):
@@ -499,6 +500,13 @@ class HeikinAshiBase(Strategy):
 
                 self.ha_trend[symbol] = 1 if np.all(trend[-2:]) else -1
 
+            # restarting the pod if latency above 11 minute(s),
+            # as the safety net to handle message flooding.
+            if seconds_passed > 660:
+                message.ack()  # ack message before restarting the pod
+                raise RestartPodException(
+                    f"A heikin-ashi klines message with {seconds_passed} "
+                    f"second(s) latency was found! Restarting the pod ...")
         # acknowledge the message
         message.ack()
 

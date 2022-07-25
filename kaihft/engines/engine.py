@@ -466,6 +466,14 @@ class SignalEngine():
                         current_trend = self.strategy.ha_trend.get(symbol, None)
                     self.signals[symbol].update(last_price, current_trend)
 
+            # restarting the pod if latency above 3 minute(s),
+            # as the safety net to handle message flooding.
+            if seconds_passed > 180:
+                message.ack()  # ack message before restarting the pod
+                raise RestartPodException(
+                    f"A ticker message with {seconds_passed} second(s) "
+                    f"latency was found! Restarting the pod ...")
+
             if self.ticker_counts % self.log_every == 0:
                 logging.info(f"[ticker] cloud pub/sub messages running, "
                     f"latency: {seconds_passed} sec, last-symbol: {symbol}")
