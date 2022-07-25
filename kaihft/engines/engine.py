@@ -3,6 +3,7 @@ import numpy as np
 import logging, json, asyncio, time
 from datetime import datetime, timedelta, timezone
 from google.cloud import pubsub_v1
+from google.protobuf.duration_pb2 import Duration
 from kaihft.databases import KaiRealtimeDatabase
 from kaihft.publishers.client import KaiPublisherClient
 from kaihft.subscribers.client import KaiSubscriberClient
@@ -405,8 +406,15 @@ class SignalEngine():
             time.sleep(30)
             # create the same subscription with the same name
             try:
+                retention_duration = Duration()
+                retention_duration.FromSeconds(600)  # 10 minutes retention duration
                 _subscription = _subscriber.client.create_subscription(
-                    request=dict(name=subscription_path, topic=topic_path))
+                    request=dict(name=subscription_path,
+                                 topic=topic_path,
+                                 message_retention_duration=retention_duration,
+                                 enable_exactly_once_delivery=True,
+                                 ack_deadline_seconds=600)
+                )
                 logging.info(f"[{str(self.strategy_type)}] [subscription] "
                              f"created: {_subscription}")
             except Exception as e:
