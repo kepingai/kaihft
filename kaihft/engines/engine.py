@@ -450,9 +450,9 @@ class SignalEngine():
             timestamp = int(message.attributes.get("timestamp"))
             ticker_time = datetime.utcfromtimestamp(timestamp / 1000)
             seconds_passed = (datetime.utcnow() - ticker_time).total_seconds()
-            # only accept data below 1.5 seconds latency
 
-            if seconds_passed <= 1.5 and seconds_passed >= 0:
+            # only accept data below 3 seconds latency
+            if seconds_passed <= 3 and seconds_passed >= 0:
                 if symbol in self.signals and self.signals[symbol].is_open():
                     # retrieve and decode the full data
                     data = json.loads(message.data.decode('utf-8'))['data']
@@ -490,7 +490,8 @@ class SignalEngine():
             timestamp = int(message.attributes.get("timestamp"))
             klines_time = datetime.utcfromtimestamp(timestamp / 1000)
             seconds_passed = (datetime.utcnow() - klines_time).total_seconds()
-            # only accept messages within 1 seconds latency
+
+            # only accept messages within 1.5 seconds latency
             if seconds_passed <= 1.5 and seconds_passed >= 0:
                 # get the symbol of the klines
                 base = message.attributes.get('base')
