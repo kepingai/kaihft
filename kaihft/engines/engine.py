@@ -122,6 +122,7 @@ class SignalEngine():
         self.strategy = self._get_strategy(strategy, self.thresholds, strategy_params)
         self.strategy_params = strategy_params
         self.is_ready = False
+        self.ha_subscriber = self.strategy_params.get('heikin_ashi_subscriber', None)
     
     def run(self):
         """ Will run signal engine concurrently, 
@@ -146,12 +147,11 @@ class SignalEngine():
             ongoing signals concurrently.
         """
         if 'HEIKIN_ASHI' in str(self.strategy_type):
-            ha_subscriber = self.strategy_params['heikin_ashi_subscriber']
             ha_callback = self.strategy.calculate_heikin_ashi_trend
             await asyncio.gather(
                 self.subscribe(self.ticker_subscriber, 'ticker', self.update_signals),
                 self.subscribe(self.klines_subscriber, 'klines', self.scout_signals),
-                self.subscribe(ha_subscriber, 'ha_klines', ha_callback),
+                self.subscribe(self.ha_subscriber, 'ha_klines', ha_callback),
                 self.listen_thresholds(self._update_thresholds),
                 self.listen_pairs(self._update_pairs),
                 self.listen_buffers(self._update_buffers)
@@ -412,7 +412,6 @@ class SignalEngine():
                     request=dict(name=subscription_path,
                                  topic=topic_path,
                                  message_retention_duration=retention_duration,
-                                 enable_exactly_once_delivery=True,
                                  ack_deadline_seconds=600)
                 )
                 logging.info(f"[{str(self.strategy_type)}] [subscription] "
@@ -469,7 +468,6 @@ class SignalEngine():
             # restarting the pod if latency above 3 minute(s),
             # as the safety net to handle message flooding.
             if seconds_passed > 180:
-                message.ack()  # ack message before restarting the pod
                 raise RestartPodException(
                     f"A ticker message with {seconds_passed} second(s) "
                     f"latency was found! Restarting the pod ...")
