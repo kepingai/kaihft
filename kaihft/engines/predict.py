@@ -3,6 +3,7 @@ import requests, json, logging
 import google.auth.transport.requests
 import os
 from typing import Tuple
+import numpy as np
 
 
 __CRED = 'credentials.json'
@@ -122,10 +123,13 @@ def predict(endpoint: str, base: str, quote: str, data: dict) -> Union[dict, Non
     headers = {"Authorization": f'bearer {id_token}', "content-type" : 'application/json'}
     params = dict(instances=dict(data=data))
     result = requests.post(model_url, data=json.dumps(params), headers=headers)
+    # TODO - R: debug mode data
+    data_report = {k: (np.array(v).shape, v[0], v[1]) for k, v in data.items()}
     if result.status_code == 200 and result.content:
         return json.loads(result.content)
-    logging.warn(f"[predict] failed inferencing to layer 2, status-code: "
-                 f"{result.status_code}, symbol: {base}{quote}, content: {result.content}")
+    logging.warn(f"[predict] failed inferring to layer 2, status-code: "
+                 f"{result.status_code}, symbol: {base}{quote}, "
+                 f"content: {result.content}, data shapes: {data_report}")
     return None
 
 
