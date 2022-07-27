@@ -1,4 +1,4 @@
-import logging
+import logging, os
 from kaihft.databases import KaiRealtimeDatabase
 from kaihft.engines.strategy import StrategyType
 from kaihft.publishers.client import KaiPublisherClient
@@ -43,7 +43,9 @@ def main(exchange: str,
             contains the params to run the signal engine
     """
     # ensure that strategy is valid before starting the signal engine
-    try: strategy = StrategyType(strategy)
+    try:
+        strategy = os.environ["STRATEGY"] if strategy is None else strategy
+        strategy = StrategyType(strategy)
     except Exception as e:
         logging.error(f"[strategy] strategy: {strategy} is not valid!")
         raise e
