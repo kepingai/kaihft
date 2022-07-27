@@ -295,6 +295,7 @@ class HeikinAshiBase(Strategy):
                      f"[heikin-ashi] config --- timeframe: {ha_timeframe}, "
                      f"EMA length: {ha_ema_len}.")
         # initialize the heikin-ashi trend dict
+        self.ha_klines_counts = 1
         self.ha_trend, self.ha_candle = {}, {}
         for _, v in pairs.items():
             for p in v:
@@ -507,6 +508,14 @@ class HeikinAshiBase(Strategy):
                 raise RestartPodException(
                     f"A heikin-ashi klines message with {seconds_passed} "
                     f"second(s) latency was found! Restarting the pod ...")
+            # logging the ha klines counter
+            if self.ha_klines_counts % (self.log_every * 10) == 0:
+                logging.info(f"[ha_klines] cloud pub/sub messages running, "
+                    f"latency: {seconds_passed} sec, last-symbol: {symbol}")
+                # reset the signal counts to 1
+                self.ha_klines_counts = 1
+            # add the counter for each message received
+            self.ha_klines_counts += 1
         # acknowledge the message
         message.ack()
 
