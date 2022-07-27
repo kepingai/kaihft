@@ -45,6 +45,7 @@ def main(exchange: str,
     # ensure that strategy is valid before starting the signal engine
     try:
         strategy = os.environ["STRATEGY"] if strategy is None else strategy
+        logging.info(f"[init] signal engine with strategy: {strategy} ...")
         strategy = StrategyType(strategy)
     except Exception as e:
         logging.error(f"[strategy] strategy: {strategy} is not valid!")

@@ -184,6 +184,8 @@ class SignalEngine():
                 if "ha_klines" in self.subscribers:
                     self.subscribers["ha_klines"].streaming_pull_future.result()
                 logging.error(f"Exception caught on subscription, Error: {e}")
+            except RestartPodException as e:
+                raise e
             finally:
                 # close all subscription to database
                 logging.info(f"[close] proceed to close all subscriptions to database ...")
