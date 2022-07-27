@@ -421,8 +421,8 @@ class HeikinAshiBase(Strategy):
             timestamp = int(message.attributes.get("timestamp"))
             klines_time = datetime.utcfromtimestamp(timestamp / 1000)
             seconds_passed = (datetime.utcnow() - klines_time).total_seconds()
-            # only accept messages within 1 seconds latency
-            if 100 >= seconds_passed >= 0:
+            # only accept messages within 150 seconds latency
+            if 150 >= seconds_passed >= 0:
                 # get the symbol of the klines
                 base = message.attributes.get('base')
                 quote = message.attributes.get('quote')
@@ -504,7 +504,9 @@ class HeikinAshiBase(Strategy):
             # restarting the pod if latency above 11 minute(s),
             # as the safety net to handle message flooding.
             if seconds_passed > 660:
-                message.ack()  # ack message before restarting the pod
+                logging.critical(f"[restart] restarting the signal engine due "
+                                 f"to excessive heikin-ashi klines message "
+                                 f"latency: {seconds_passed} seconds.")
                 raise RestartPodException(
                     f"A heikin-ashi klines message with {seconds_passed} "
                     f"second(s) latency was found! Restarting the pod ...")

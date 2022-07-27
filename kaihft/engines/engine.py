@@ -172,7 +172,7 @@ class SignalEngine():
                 if "ha_klines" in self.subscribers:
                     self.subscribers["ha_klines"].streaming_pull_future.result(
                         timeout=self.subscriptions_params["ha_klines"]['timeout'])
-            except TimeoutError as e:
+            except (TimeoutError, RestartPodException) as e:
                 # Trigger the shutdown.
                 self.subscribers["ticker"].streaming_pull_future.cancel()
                 self.subscribers["klines"].streaming_pull_future.cancel()
@@ -184,6 +184,7 @@ class SignalEngine():
                 if "ha_klines" in self.subscribers:
                     self.subscribers["ha_klines"].streaming_pull_future.result()
                 logging.error(f"Exception caught on subscription, Error: {e}")
+                if type(e) is RestartPodException: raise e
             finally:
                 # close all subscription to database
                 logging.info(f"[close] proceed to close all subscriptions to database ...")
@@ -466,7 +467,10 @@ class SignalEngine():
 
             # restarting the pod if latency above 3 minute(s),
             # as the safety net to handle message flooding.
-            if seconds_passed > 180:
+            if seconds_passed > 180 and self.is_ready:
+                logging.critical(f"[restart] restarting the signal engine due "
+                                 f"to excessive ticker message "
+                                 f"latency: {seconds_passed} seconds.")
                 raise RestartPodException(
                     f"A ticker message with {seconds_passed} second(s) "
                     f"latency was found! Restarting the pod ...")
