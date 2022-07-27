@@ -172,7 +172,7 @@ class SignalEngine():
                 if "ha_klines" in self.subscribers:
                     self.subscribers["ha_klines"].streaming_pull_future.result(
                         timeout=self.subscriptions_params["ha_klines"]['timeout'])
-            except (TimeoutError, RestartPodException) as e:
+            except TimeoutError as e:
                 # Trigger the shutdown.
                 self.subscribers["ticker"].streaming_pull_future.cancel()
                 self.subscribers["klines"].streaming_pull_future.cancel()
@@ -184,7 +184,6 @@ class SignalEngine():
                 if "ha_klines" in self.subscribers:
                     self.subscribers["ha_klines"].streaming_pull_future.result()
                 logging.error(f"Exception caught on subscription, Error: {e}")
-                if type(e) is RestartPodException: raise e
             finally:
                 # close all subscription to database
                 logging.info(f"[close] proceed to close all subscriptions to database ...")
