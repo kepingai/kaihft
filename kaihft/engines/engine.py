@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-import logging, json, asyncio, time
+import logging, json, asyncio, time, os
 from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 from google.cloud import pubsub_v1
@@ -8,7 +8,6 @@ from google.protobuf.duration_pb2 import Duration
 from kaihft.databases import KaiRealtimeDatabase
 from kaihft.publishers.client import KaiPublisherClient
 from kaihft.subscribers.client import KaiSubscriberClient
-from kaihft.alerts.exceptions import RestartPodException
 from .strategy import StrategyType, get_strategy, Strategy
 from .signal import SignalStatus, init_signal_from_rtd, Signal
 
@@ -184,8 +183,6 @@ class SignalEngine():
                 if "ha_klines" in self.subscribers:
                     self.subscribers["ha_klines"].streaming_pull_future.result()
                 logging.error(f"Exception caught on subscription, Error: {e}")
-            except RestartPodException as e:
-                raise e
             finally:
                 # close all subscription to database
                 logging.info(f"[close] proceed to close all subscriptions to database ...")
@@ -472,9 +469,7 @@ class SignalEngine():
                 logging.critical(f"[restart] restarting the signal engine due "
                                  f"to excessive ticker message "
                                  f"latency: {seconds_passed} seconds.")
-                raise RestartPodException(
-                    f"A ticker message with {seconds_passed} second(s) "
-                    f"latency was found! Restarting the pod ...")
+                if os.path.exists('tmp/healthy'): os.remove('tmp/healthy')
 
             if self.ticker_counts % self.log_every == 0:
                 logging.info(f"[ticker] cloud pub/sub messages running, "
@@ -592,9 +587,9 @@ class SignalEngine():
                     self.set_enging_state()                 
         except Exception as e:
             logging.error(f"[strategy] Exception caught running-strategy, "
-                f"symbol:-{symbol}, error: {e}")
-            raise RestartPodException(f"[strategy] Unable to connect to "
-                f"firebase rtd pod need to restart, error: {e}")   
+                          f"symbol:-{symbol}. Unable to connect to firebase "
+                          f"rtd pod need to restart, error: {e}")
+            if os.path.exists('tmp/healthy'): os.remove('tmp/healthy')
         finally:
             # ensure that the symbol is removed
             # from scouts so that there will be no locks.
