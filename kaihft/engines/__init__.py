@@ -3,3 +3,4 @@
     and layer 2.
 """
 from .engine import *
+from .index_engine import *

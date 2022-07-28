@@ -8,3 +8,4 @@ google-cloud-pubsub==2.8.0
 python-binance==0.7.5
 numpy==1.21.2
 numexpr==2.7.1
+ccxt==1.76.38

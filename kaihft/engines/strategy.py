@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from abc import abstractmethod
 from google.cloud import pubsub_v1
 import json
+import ccxt
 import os
 import requests
 
@@ -23,6 +24,9 @@ class StrategyType(Enum):
     MAX_DRAWDOWN_SUPER_TREND_SPREAD = "MAX_DRAWDOWN_SUPER_TREND_SPREAD"
     HEIKIN_ASHI_HYBRID = "HEIKIN_ASHI_HYBRID"
     HEIKIN_ASHI_REGRESSION = "HEIKIN_ASHI_REGRESSION"
+
+    # layer 1 strategy for index bot
+    INDEX_24HRS_AVERAGE = "INDEX_24HRS_AVERAGE"
 
     def __str__(self):
         """ Convert the enum object to string. 
@@ -1368,13 +1372,67 @@ class MaxDrawdownSqueeze(Strategy):
         ) if signal else None
 
 
+class Index24HrsAverage(Strategy):
+    """ Index24HrsAverage strategy's implementation checks
+        if the average of price difference of all assets of an index
+        is below the threshold value.
+    """
+    def __init__(self):
+        self.threshold = -10
+
+    def scout(self, base: str, quote: str, dataframe: pd.DataFrame,
+              callback: callable) -> Union[Signal, None]:
+        pass
+
+    def send_index_signal(self,
+                          exchange: ccxt.Exchange,
+                          symbols: list,
+                          quote: str) -> bool:
+        """ Send the index signal if the criteria is met.
+
+            Parameters
+            ----------
+            exchange: `ccxt.Exchange`
+                The exchange class.
+            symbols: `list`
+                A list of the assets' symbols for an index.
+            quote: `str`
+                The quote instrument for the assets.
+
+            Return
+            ------
+            `bool`
+                True if criteria is met.
+        """
+        # calculate the closing price difference for each asset
+        diff_percent = {}
+        for symbol in symbols:
+            _symbol = symbol + f"{quote}"
+            # get hourly ohlcv data for 1 day
+            ohlcv = exchange.fetch_ohlcv(symbol=_symbol, timeframe="1h",
+                                         limit=24)
+            # calculate 24hrs closing price difference in percentage value
+            first_close_price = ohlcv[0][-2]
+            last_close_price = ohlcv[-1][-2]
+            close_diff_percent = (last_close_price - first_close_price) / \
+                                 first_close_price * 100
+            diff_percent[symbol] = close_diff_percent
+
+        # the average
+        avg_diff_percent = sum(list(diff_percent.values())) / len(diff_percent)
+        logging.info(f"inside send_index_signal") # TODO debug
+        logging.info(f"diff_percent: {diff_percent}")  # TODO debug
+        logging.info(f"avg_diff_percent: {avg_diff_percent}")  # TODO debug
+        return avg_diff_percent <= self.threshold
+
 __REGISTRY = {
     str(StrategyType.SUPER_TREND_SQUEEZE): SuperTrendSqueeze,
     str(StrategyType.MAX_DRAWDOWN_SQUEEZE): MaxDrawdownSqueeze,
     str(StrategyType.MAX_DRAWDOWN_SPREAD): MaxDrawdownSpread,
     str(StrategyType.MAX_DRAWDOWN_SUPER_TREND_SPREAD): MaxDrawdownSuperTrendSpread,
     str(StrategyType.HEIKIN_ASHI_HYBRID): HeikinAshiHybrid,
-    str(StrategyType.HEIKIN_ASHI_REGRESSION): HeikinAshiRegression
+    str(StrategyType.HEIKIN_ASHI_REGRESSION): HeikinAshiRegression,
+    str(StrategyType.INDEX_24HRS_AVERAGE): Index24HrsAverage
 }
 
 

@@ -129,5 +129,22 @@ def signal_binance_futures(strategy, version, log_every, log_metrics_every,
         strategy_params=strategy_params)
 
 
+@cli.command()
+@click.option('--strategy', default="INDEX_24HRS_AVERAGE", help="Available strategies: [INDEX_24HRS_AVERAGE]")
+@click.option('--version', default='v0', help="The version of signal engine.")
+@click.option('--log-every', default=1000, help="Log cloud pub/sub messages every.")
+@click.option('--production', is_flag=True, help='Publish & subscribe messages to production topic.')
+@click.option('--index-id', default='crypto', help='The index id options: crypto, defi')
+# @notify_failure
+def index_signal_binance(strategy, production, log_every, index_id, version):
+    services.index_signal_engine.main(
+        exchange='binance',
+        strategy=strategy,
+        production=production,
+        log_every=log_every,
+        index_id=index_id,
+        version=version)
+
+
 if __name__ == "__main__":
     cli()
