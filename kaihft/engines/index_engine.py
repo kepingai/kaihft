@@ -42,7 +42,7 @@ class IndexSignalEngine():
         self.index_id = index_id
         self.publisher = publisher
         self.strategy_type = strategy
-        self.strategy = get_strategy(self.strategy_type)
+        self.strategy = get_strategy(self.strategy_type)()
         self.topic_index_signal = topic_index_signal
 
         self.index_id_registry = {'crypto': 'idx0',
@@ -76,7 +76,7 @@ class IndexSignalEngine():
             `ccxt.Exchange`
                 The ccxt exchange object corresponding to the exchange type.
         """
-        return self.exchange_registry[self.exchange]
+        return self.exchange_registry[self.exchange]()
 
     def get_assets(self) -> list:
         """ Retrieve list of assets for an index.
@@ -123,14 +123,12 @@ class IndexSignalEngine():
         logging.info(f"[Publishing] Publishing trigger for"
                      f" index_id: {index_id}")
         # publish the newly created signal
-        # to dedicated archiving topic
-        logging.info(f"Publishing to: {self.topic_index_signal}")  # TODO debug
-        logging.info(f"data: {index_signal}") # TODO debug
-        # self.publisher.publish(
-        #     origin=self.__class__.__name__,
-        #     topic_path=self.topic_index_signal,
-        #     data=index_signal,
-        #     attributes=dict(
-        #        index_id=index_id
-        #     ))
+        # to dedicated topic
+        self.publisher.publish(
+            origin=self.__class__.__name__,
+            topic_path=self.topic_index_signal,
+            data=index_signal,
+            attributes=dict(
+               index_id=index_id
+            ))
 

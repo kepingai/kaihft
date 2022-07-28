@@ -1420,9 +1420,6 @@ class Index24HrsAverage(Strategy):
 
         # the average
         avg_diff_percent = sum(list(diff_percent.values())) / len(diff_percent)
-        logging.info(f"inside send_index_signal") # TODO debug
-        logging.info(f"diff_percent: {diff_percent}")  # TODO debug
-        logging.info(f"avg_diff_percent: {avg_diff_percent}")  # TODO debug
         return avg_diff_percent <= self.threshold
 
 __REGISTRY = {
