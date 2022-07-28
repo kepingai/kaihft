@@ -296,7 +296,7 @@ class HeikinAshiBase(Strategy):
         # initialize the heikin-ashi trend dict
         self.ha_klines_counts = 1
         self.ha_trend, self.ha_candle, self.ha_cooldowns = {}, {}, {}
-        self.ha_cooldown = 10  # second(s)
+        self.ha_cooldown = 100  # second(s)
         for _, v in pairs.items():
             for p in v:
                 if p not in self.ha_trend: self.ha_trend[p] = 0
