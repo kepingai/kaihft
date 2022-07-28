@@ -294,7 +294,9 @@ class HeikinAshiBase(Strategy):
                      f"[heikin-ashi] config --- timeframe: {ha_timeframe}, "
                      f"EMA length: {ha_ema_len}.")
         # initialize the heikin-ashi trend dict
-        self.ha_trend, self.ha_candle = {}, {}
+        self.ha_klines_counts = 1
+        self.ha_trend, self.ha_candle, self.ha_cooldowns = {}, {}, {}
+        self.ha_cooldown = 100  # second(s)
         for _, v in pairs.items():
             for p in v:
                 if p not in self.ha_trend: self.ha_trend[p] = 0
@@ -419,8 +421,8 @@ class HeikinAshiBase(Strategy):
             timestamp = int(message.attributes.get("timestamp"))
             klines_time = datetime.utcfromtimestamp(timestamp / 1000)
             seconds_passed = (datetime.utcnow() - klines_time).total_seconds()
-            # only accept messages within 1 seconds latency
-            if 100 >= seconds_passed >= 0:
+            # only accept messages within 150 seconds latency
+            if 150 >= seconds_passed >= 0 and self.is_valid_cooldown(symbol):
                 # get the symbol of the klines
                 base = message.attributes.get('base')
                 quote = message.attributes.get('quote')
@@ -499,6 +501,22 @@ class HeikinAshiBase(Strategy):
 
                 self.ha_trend[symbol] = 1 if np.all(trend[-2:]) else -1
 
+            # restarting the pod if latency above 10 minute(s),
+            # as the safety net to handle message flooding.
+            if seconds_passed > 600:
+                logging.critical(f"[restart] restarting the signal engine due "
+                                 f"to excessive heikin-ashi klines message "
+                                 f"latency: {seconds_passed} seconds.")
+                if os.path.exists('tmp/healthy'): os.remove('tmp/healthy')
+            # logging the ha klines counter
+            if self.ha_klines_counts % (self.log_every * 10) == 0:
+                logging.info(f"[ha_klines] cloud pub/sub messages running, "
+                             f"latency: {seconds_passed} sec, last-symbol: "
+                             f"{symbol}, ha_trend: {self.ha_trend}")
+                # reset the signal counts to 1
+                self.ha_klines_counts = 1
+            # add the counter for each message received
+            self.ha_klines_counts += 1
         # acknowledge the message
         message.ack()
 
@@ -523,6 +541,31 @@ class HeikinAshiBase(Strategy):
                 (x / 1000)).strftime('%c'))))
         dataframe[ohlcv] = dataframe[ohlcv].astype('float32')
         return dataframe
+
+    def is_valid_cooldown(self, symbol: str) -> bool:
+        """ Will check if cooldown time have passed if a heikin-ashi trend
+            have been calculated for that pair.
+
+            Parameters
+            ----------
+            symbol: `str`
+                The symbol of coin.
+
+            Returns
+            -------
+            `bool`
+                Return `False` if counter have not surpass the cooldown time.
+        """
+        if symbol in self.ha_cooldowns:
+            # check if the time surpasses the cooldown time
+            if datetime.utcnow() >= self.ha_cooldowns[symbol]:
+                self.ha_cooldowns[symbol] += timedelta(seconds=self.ha_cooldown)
+                return True
+        else:
+            # initialize the time buffer
+            self.ha_cooldowns[symbol] = datetime.utcnow() + timedelta(seconds=self.ha_cooldown)
+            return True
+        return False
 
 
 class HeikinAshiRegression(HeikinAshiBase):

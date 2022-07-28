@@ -1,14 +1,15 @@
 import logging
+from typing import Union
 from kaihft.publishers.exchanges import BinanceTickerPublisher
 from kaihft.publishers.client import KaiPublisherClient
 from unicorn_binance_websocket_api.unicorn_binance_websocket_api_manager import BinanceWebSocketApiManager
 
-def main(
-    markets: dict, 
-    production: bool,
-    exp0a: bool,
-    exp1a: bool,
-    topic_path: str = 'ticker-binance-v0'):
+def main(markets: dict,
+         production: bool,
+         exp0a: bool,
+         exp1a: bool,
+         topic_path: str = 'ticker-binance-v0',
+         restart_every: Union[int, float] = 60):
     """ Retrieve real-time binance data via websocket &
         then publish binance tickers to Cloud Pub/Sub. 
 
@@ -25,6 +26,8 @@ def main(
             if `True` publisher will publish to exp1a topic.
         topic_path: `str`
             The topic path to publish ticker.
+        restart_every: `Union[int, float]`
+            Restart the ticker pod every X minute(s), default is 60 minutes
     """
     if production: topic_path = f'prod-{topic_path}'; mode="prediction"
     elif exp0a: topic_path = f'exp0a-{topic_path}'; mode="experiment-0a"
@@ -52,5 +55,7 @@ def main(
         websocket=binance_websocket_api_manager,
         stream_id=stream_id,
         publisher=publisher,
-        topic_path=topic_path)
+        topic_path=topic_path,
+        restart_every=restart_every
+    )
     ticker_publisher.run()

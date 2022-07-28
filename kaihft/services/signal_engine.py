@@ -1,4 +1,4 @@
-import logging
+import logging, os
 from kaihft.databases import KaiRealtimeDatabase
 from kaihft.engines.strategy import StrategyType
 from kaihft.publishers.client import KaiPublisherClient
@@ -43,7 +43,10 @@ def main(exchange: str,
             contains the params to run the signal engine
     """
     # ensure that strategy is valid before starting the signal engine
-    try: strategy = StrategyType(strategy)
+    try:
+        strategy = os.environ["STRATEGY"] if strategy is None else strategy
+        logging.info(f"[init] signal engine with strategy: {strategy} ...")
+        strategy = StrategyType(strategy)
     except Exception as e:
         logging.error(f"[strategy] strategy: {strategy} is not valid!")
         raise e
@@ -67,15 +70,13 @@ def main(exchange: str,
         f"layer 2 endpoint: {endpoint}")
     # initialize signal engine class and run it
     params = {
-        "ticker": dict(id=ticker_topic_path, timeout=timeout),
-        "klines": dict(id=klines_topic_path, timeout=timeout)}
+        "ticker": dict(id=ticker_topic_path, timeout=timeout, sub=KaiSubscriberClient()),
+        "klines": dict(id=klines_topic_path, timeout=timeout, sub=KaiSubscriberClient())}
 
     if 'HEIKIN_ASHI' in str(strategy):
         heikin_ashi_topic_path = f'{path}-klines-{exchange}-{version}-{strategy_params["ha_timeframe"]}-sub'
-        heikin_ashi_subscriber = KaiSubscriberClient()
-        params.update({"ha_klines": dict(id=heikin_ashi_topic_path, timeout=timeout)})
-        strategy_params.update({"heikin_ashi_subscriber": heikin_ashi_subscriber,
-                                "mode": path})
+        params.update({"ha_klines": dict(id=heikin_ashi_topic_path, timeout=timeout, sub=KaiSubscriberClient())})
+        strategy_params.update({"mode": path})
         if "use_ha_stop_dir" in strategy_params:
             if strategy_params["use_ha_stop_dir"]:
                 logging.info(f"[signal-{version}] [{exchange}] use the heikin-"
@@ -85,9 +86,6 @@ def main(exchange: str,
 
     # initialize publisher
     publisher = KaiPublisherClient()
-    ticker_subscriber = KaiSubscriberClient()
-    klines_subscriber = KaiSubscriberClient()
-
     # initiate access to database
     database = KaiRealtimeDatabase()
     # initialize engine and start running!
@@ -101,8 +99,6 @@ def main(exchange: str,
         archive_topic_path=archive_topic_path,
         dist_topic_path=dist_topic_path,
         publisher=publisher,
-        ticker_subscriber=ticker_subscriber,
-        klines_subscriber=klines_subscriber,
         subscriptions_params=params,
         log_every=log_every,
         log_metrics_every=log_metrics_every,

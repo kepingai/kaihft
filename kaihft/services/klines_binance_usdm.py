@@ -8,12 +8,11 @@ from kaihft.alerts import RestartPodException
 from kaihft.databases import KaiRealtimeDatabase
 
 
-def main(
-        n_klines: int,
-        production: bool,
-        timeframe: int,
-        topic_path: str = 'klines-binance-v0',
-        restart_every: Union[int, float] = 60):
+def main(n_klines: int,
+         production: bool,
+         timeframe: int,
+         topic_path: str = 'klines-binance-v0',
+         restart_every: Union[int, float] = 60):
     """ Retrieve real-time binance data via websocket &
         then publish binance klines to Cloud Pub/Sub.
 

@@ -1,12 +1,13 @@
 import pandas as pd
 import numpy as np
-import logging, json, asyncio, time
+import logging, json, asyncio, time, os
+from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 from google.cloud import pubsub_v1
+from google.protobuf.duration_pb2 import Duration
 from kaihft.databases import KaiRealtimeDatabase
 from kaihft.publishers.client import KaiPublisherClient
 from kaihft.subscribers.client import KaiSubscriberClient
-from kaihft.alerts.exceptions import RestartPodException
 from .strategy import StrategyType, get_strategy, Strategy
 from .signal import SignalStatus, init_signal_from_rtd, Signal
 
@@ -26,8 +27,6 @@ class SignalEngine():
         archive_topic_path: str,
         dist_topic_path: str,
         publisher: KaiPublisherClient,
-        ticker_subscriber: KaiSubscriberClient,
-        klines_subscriber: KaiSubscriberClient,
         subscriptions_params: dict,
         log_every: int,
         log_metrics_every: int,
@@ -58,10 +57,6 @@ class SignalEngine():
                 Is the signal archiving topic path for new and closed signals.
             dist_topic_path: `str`
                 Is the distribute-signal topic path for new and closed signals.
-            ticker_subscriber: `KaiSubscriberClient`
-                The subscriber client for ticker.
-            klines_subscriber: `KaiSubscriberClient`
-                The subscriber client for klines.
             subscriptions_params: `dict`
                 A dictionary containing the subscription id and timeout.
             endpoint: `str`
@@ -99,8 +94,6 @@ class SignalEngine():
         self.archive_topic_path = archive_topic_path
         self.dist_topic_path = dist_topic_path
         self.publisher = publisher
-        self.ticker_subscriber = ticker_subscriber
-        self.klines_subscriber = klines_subscriber
         self.subscriptions_params = self.validate_params(subscriptions_params)
         self.scouts = []
         self.log_every = log_every
@@ -121,6 +114,9 @@ class SignalEngine():
         self.strategy = self._get_strategy(strategy, self.thresholds, strategy_params)
         self.strategy_params = strategy_params
         self.is_ready = False
+        self.subscribers = {}
+        for k, v in self.subscriptions_params.items():
+            self.subscribers[k] = v['sub']
     
     def run(self):
         """ Will run signal engine concurrently, 
@@ -144,46 +140,52 @@ class SignalEngine():
             and begin the signal engine on scouting and monitoring
             ongoing signals concurrently.
         """
-        if 'HEIKIN_ASHI' in str(self.strategy_type):
-            ha_subscriber = self.strategy_params['heikin_ashi_subscriber']
+        if "ha_klines" in self.subscribers:
             ha_callback = self.strategy.calculate_heikin_ashi_trend
             await asyncio.gather(
-                self.subscribe(self.ticker_subscriber, 'ticker', self.update_signals),
-                self.subscribe(self.klines_subscriber, 'klines', self.scout_signals),
-                self.subscribe(ha_subscriber, 'ha_klines', ha_callback),
+                self.subscribe('ticker', self.update_signals),
+                self.subscribe('klines', self.scout_signals),
+                self.subscribe('ha_klines', ha_callback),
                 self.listen_thresholds(self._update_thresholds),
                 self.listen_pairs(self._update_pairs),
                 self.listen_buffers(self._update_buffers)
             )
         else:
             await asyncio.gather(
-                self.subscribe(self.ticker_subscriber, 'ticker', self.update_signals),
-                self.subscribe(self.klines_subscriber, 'klines', self.scout_signals),
+                self.subscribe('ticker', self.update_signals),
+                self.subscribe('klines', self.scout_signals),
                 self.listen_thresholds(self._update_thresholds),
                 self.listen_pairs(self._update_pairs),
                 self.listen_max_drawdowns(self._update_max_drawdowns),
                 self.listen_buffers(self._update_buffers)
             )
         self.is_ready = True
-
-        with self.ticker_subscriber.client, self.klines_subscriber.client:
+        # using arbitrary context manager to run the subscription streams
+        with ExitStack() as es:
+            [es.enter_context(self.subscribers[sub_id].client) for sub_id in self.subscribers]
             try:
-                # When `timeout` is not set, result() will block indefinitely,
-                # unless an exception is encountered first.
-                self.ticker_subscriber.streaming_pull_future.result(
-                    timeout=self.subscriptions_params['ticker']['timeout'])
-                self.klines_subscriber.streaming_pull_future.result(
-                    timeout=self.subscriptions_params['klines']['timeout'])
+                self.subscribers["ticker"].streaming_pull_future.result(
+                    timeout=self.subscriptions_params["ticker"]['timeout'])
+                self.subscribers["klines"].streaming_pull_future.result(
+                    timeout=self.subscriptions_params["klines"]['timeout'])
+                if "ha_klines" in self.subscribers:
+                    self.subscribers["ha_klines"].streaming_pull_future.result(
+                        timeout=self.subscriptions_params["ha_klines"]['timeout'])
             except TimeoutError as e:
                 # Trigger the shutdown.
-                self.ticker_subscriber.streaming_pull_future.cancel()  
-                self.klines_subscriber.streaming_pull_future.cancel()
+                self.subscribers["ticker"].streaming_pull_future.cancel()
+                self.subscribers["klines"].streaming_pull_future.cancel()
+                if "ha_klines" in self.subscribers:
+                    self.subscribers["ha_klines"].streaming_pull_future.cancel()
                 # Block until the shutdown is complete.
-                self.ticker_subscriber.streaming_pull_future.result()  
-                self.klines_subscriber.streaming_pull_future.result()
-                logging.error(f"Exception caught subscription, Error: {e}")
+                self.subscribers["ticker"].streaming_pull_future.result()
+                self.subscribers["klines"].streaming_pull_future.result()
+                if "ha_klines" in self.subscribers:
+                    self.subscribers["ha_klines"].streaming_pull_future.result()
+                logging.error(f"Exception caught on subscription, Error: {e}")
             finally:
                 # close all subscription to database
+                logging.info(f"[close] proceed to close all subscriptions to database ...")
                 if self.listener_thresholds: self.listener_thresholds.close()
                 if self.listener_pairs: self.listener_pairs.close()
                 if self.listener_max_drawdowns: self.listener_max_drawdowns.close()
@@ -361,7 +363,6 @@ class SignalEngine():
         logging.info(f"[listen] updated buffer: {self.buffers}")
     
     async def subscribe(self,
-                        subscriber: KaiSubscriberClient,
                         subscription: str,
                         callback: callable,
                         single_stream: bool = False):
@@ -369,8 +370,6 @@ class SignalEngine():
 
             Parameters
             ----------
-            subscriber: `KaiSubscriberClient`
-                A subscription client to listen to messages.`
             subscription: `str`
                 `ticker` or `klines` topic subscription.
             callback: `callable`
@@ -405,8 +404,14 @@ class SignalEngine():
             time.sleep(30)
             # create the same subscription with the same name
             try:
+                retention_duration = Duration()
+                retention_duration.FromSeconds(600)  # 10 minutes retention duration
                 _subscription = _subscriber.client.create_subscription(
-                    request=dict(name=subscription_path, topic=topic_path))
+                    request=dict(name=subscription_path,
+                                 topic=topic_path,
+                                 message_retention_duration=retention_duration,
+                                 ack_deadline_seconds=600)
+                )
                 logging.info(f"[{str(self.strategy_type)}] [subscription] "
                              f"created: {_subscription}")
             except Exception as e:
@@ -421,7 +426,7 @@ class SignalEngine():
                      f"for 30 seconds before subscribing to the newly created "
                      f"subscription entity: {subscription} ...")
         time.sleep(30)
-        subscriber.subscribe(
+        self.subscribers[subscription].subscribe(
             subscription_id=self.subscriptions_params[subscription]['id'],
             timeout=self.subscriptions_params[subscription]['timeout'],
             callback=callback,
@@ -442,9 +447,9 @@ class SignalEngine():
             timestamp = int(message.attributes.get("timestamp"))
             ticker_time = datetime.utcfromtimestamp(timestamp / 1000)
             seconds_passed = (datetime.utcnow() - ticker_time).total_seconds()
-            # only accept data below 1.5 seconds latency
 
-            if seconds_passed <= 1.5 and seconds_passed >= 0:
+            # only accept data below 3 seconds latency
+            if seconds_passed <= 3 and seconds_passed >= 0:
                 if symbol in self.signals and self.signals[symbol].is_open():
                     # retrieve and decode the full data
                     data = json.loads(message.data.decode('utf-8'))['data']
@@ -457,6 +462,14 @@ class SignalEngine():
                             self.strategy_params.get("use_ha_stop_dir", False):
                         current_trend = self.strategy.ha_trend.get(symbol, None)
                     self.signals[symbol].update(last_price, current_trend)
+
+            # restarting the pod if latency above 3 minute(s),
+            # as the safety net to handle message flooding.
+            if seconds_passed > 180 and self.is_ready:
+                logging.critical(f"[restart] restarting the signal engine due "
+                                 f"to excessive ticker message "
+                                 f"latency: {seconds_passed} seconds.")
+                if os.path.exists('tmp/healthy'): os.remove('tmp/healthy')
 
             if self.ticker_counts % self.log_every == 0:
                 logging.info(f"[ticker] cloud pub/sub messages running, "
@@ -482,7 +495,8 @@ class SignalEngine():
             timestamp = int(message.attributes.get("timestamp"))
             klines_time = datetime.utcfromtimestamp(timestamp / 1000)
             seconds_passed = (datetime.utcnow() - klines_time).total_seconds()
-            # only accept messages within 1 seconds latency
+
+            # only accept messages within 1.5 seconds latency
             if seconds_passed <= 1.5 and seconds_passed >= 0:
                 # get the symbol of the klines
                 base = message.attributes.get('base')
@@ -573,9 +587,9 @@ class SignalEngine():
                     self.set_enging_state()                 
         except Exception as e:
             logging.error(f"[strategy] Exception caught running-strategy, "
-                f"symbol:-{symbol}, error: {e}")
-            raise RestartPodException(f"[strategy] Unable to connect to "
-                f"firebase rtd pod need to restart, error: {e}")   
+                          f"symbol:-{symbol}. Unable to connect to firebase "
+                          f"rtd pod need to restart, error: {e}")
+            if os.path.exists('tmp/healthy'): os.remove('tmp/healthy')
         finally:
             # ensure that the symbol is removed
             # from scouts so that there will be no locks.
@@ -783,9 +797,15 @@ class SignalEngine():
                 If params badly formatted.
         """
         assert ('ticker' in params and 'id' in params['ticker'] and
-            'timeout' in params['ticker']), "Subscription ticker param badly formatted."
+            'timeout' in params['ticker'] and 'sub' in params['ticker']), \
+            "Subscription ticker param badly formatted."
         assert ('klines' in params and 'id' in params['klines'] and
-            'timeout' in params['klines']), "Subscription klines param badly formatted."
+            'timeout' in params['klines'] and 'sub' in params['klines']), \
+            "Subscription klines param badly formatted."
+        if 'ha_klines' in params:
+            assert ('id' in params['ha_klines'] and 'timeout' in params['ha_klines']
+                    and 'sub' in params['ha_klines']), \
+                "Subscription heikin-ashi klines param badly formatted."
         return params
     
     def _get_max_drawdowns(self) -> dict:
