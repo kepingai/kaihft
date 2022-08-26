@@ -140,7 +140,8 @@ class SignalEngine():
             and begin the signal engine on scouting and monitoring
             ongoing signals concurrently.
         """
-        if "ha_klines" in self.subscribers:
+        if ("ha_klines" in self.subscribers
+                and self.strategy != StrategyType.HEIKIN_ASHI_FRAC_DIFF):
             ha_callback = self.strategy.calculate_heikin_ashi_trend
             await asyncio.gather(
                 self.subscribe('ticker', self.update_signals),
@@ -149,6 +150,14 @@ class SignalEngine():
                 self.listen_thresholds(self._update_thresholds),
                 self.listen_pairs(self._update_pairs),
                 self.listen_buffers(self._update_buffers)
+            )
+        elif ("ha_klines" in self.subscribers
+                and self.strategy == StrategyType.HEIKIN_ASHI_FRAC_DIFF):
+            ha_callback = self.strategy.calculate_heikin_ashi_trend
+            await asyncio.gather(
+                self.subscribe('ticker', self.update_signals),
+                self.subscribe('klines', self.scout_signals),
+                self.subscribe('ha_klines', ha_callback),
             )
         else:
             await asyncio.gather(
@@ -1004,6 +1013,22 @@ class SignalEngine():
                 expiration_minutes=strategy_params.get("expiration_minutes", None)
             )
         elif self.strategy_type == StrategyType.HEIKIN_ASHI_REGRESSION:
+            return strategy_class(
+                mode=strategy_params['mode'],
+                kaiforecast_version=strategy_params.get("kaiforecast_version", None),
+                long_spread=thresholds['long']['bet_threshold'],
+                short_spread=thresholds['short']['bet_threshold'],
+                long_ttp=thresholds['long']['ttp_threshold'],
+                short_ttp=thresholds['short']['ttp_threshold'],
+                pairs=self.pairs,
+                ha_timeframe=strategy_params['ha_timeframe'],
+                model_timeframe=strategy_params['timeframe'],
+                ha_ema_len=strategy_params['ha_ema_len'],
+                log_every=self.log_metrics_every,
+                endpoint=self.endpoint,
+                expiration_minutes=strategy_params.get("expiration_minutes", None)
+            )
+        elif self.strategy_type == StrategyType.HEIKIN_ASHI_FRAC_DIFF:
             return strategy_class(
                 mode=strategy_params['mode'],
                 kaiforecast_version=strategy_params.get("kaiforecast_version", None),

@@ -8,12 +8,21 @@ from enum import Enum
 from typing import Union, Tuple, Optional
 from .signal import Signal
 from .predict import predict, predict_cloud_run, predict_cloud_run_regression
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from abc import abstractmethod
 from google.cloud import pubsub_v1
 import json
 import os
 import requests
+from kaiforecast.preprocessing import (EMASlope, EMARelationship,
+                                       RVOL, VWAP, CCI,
+                                       BollingerMidBand,
+                                       AverageDirectionalIndex,
+                                       DirectionalMovement)
+from statsmodels.tsa.stattools import adfuller
+from numpy_fracdiff import fracdiff
+from scipy.optimize import brentq
+import pickle
 
 
 class StrategyType(Enum):
@@ -23,6 +32,7 @@ class StrategyType(Enum):
     MAX_DRAWDOWN_SUPER_TREND_SPREAD = "MAX_DRAWDOWN_SUPER_TREND_SPREAD"
     HEIKIN_ASHI_HYBRID = "HEIKIN_ASHI_HYBRID"
     HEIKIN_ASHI_REGRESSION = "HEIKIN_ASHI_REGRESSION"
+    HEIKIN_ASHI_FRAC_DIFF = "HEIKIN_ASHI_FRAC_DIFF"
 
     def __str__(self):
         """ Convert the enum object to string. 
@@ -35,17 +45,18 @@ class StrategyType(Enum):
         return str(self.value)
 
     def __eq__(self, __o: object) -> bool:
-        if isinstance(__o, str): 
+        if isinstance(__o, str):
             return str(self.value).upper() == __o.upper()
         return super().__eq__(__o)
 
 
 class Strategy():
     """ Abstract strategy class. """
-    def __init__(self, 
-                 name: str, 
+
+    def __init__(self,
+                 name: str,
                  strategy: StrategyType,
-                 description: str, 
+                 description: str,
                  endpoint: str,
                  long_spread: float,
                  long_ttp: float,
@@ -69,9 +80,10 @@ class Strategy():
         ne.set_vml_num_threads(8)
         # initialize running metrics
         self.metrics = {}
-        self.buffer = 5 # default buffer
+        self.buffer = 5  # default buffer
         self.buffers = {}
-        logging.info(f"[strategy] Strategy initialized {self.name}  ({self.strategy}), "
+        logging.info(
+            f"[strategy] Strategy initialized {self.name}  ({self.strategy}), "
             f"long_spread: {self.long_spread}, long_ttp: {self.long_ttp}, "
             f"short_spread: {self.short_spread}, short_ttp: {self.short_ttp}")
         if self.expiration_minutes is not None:
@@ -82,7 +94,7 @@ class Strategy():
     def scout(self, base: str, quote: str, dataframe: pd.DataFrame,
               callback: callable) -> Union[Signal, None]:
         raise NotImplementedError()
-    
+
     def layer2(self, base: str, quote: str, data: dict):
         """ Connect to layer 2 and inference to specific model. 
 
@@ -102,7 +114,8 @@ class Strategy():
                 percentage spread, direction, the number of n-tick
                 predicted forward, the base pair and the quote pair.
         """
-        result = predict(endpoint=self.endpoint, base=base, quote=quote, data=data)
+        result = predict(endpoint=self.endpoint, base=base, quote=quote,
+                         data=data)
         # if prediction fails return nones
         if not result: return None, None, None, base, quote
         # retrieve the predictions dictionary only
@@ -112,24 +125,26 @@ class Strategy():
             # ensure that there's percentage array in the prediction
             # note that only some of the models has this integrated
             if 'percentage_arr' not in pred: return None, None, None, base, quote
-            percentage_spread, direction = self.select_direction(pred['percentage_arr'])
+            percentage_spread, direction = self.select_direction(
+                pred['percentage_arr'])
             return (
                 percentage_spread,
                 direction,
                 int(pred['n_tick_forward']),
-                str(result['base']), 
+                str(result['base']),
                 str(result['quote'])
             )
         elif self.strategy == StrategyType.SUPER_TREND_SQUEEZE:
-            return (float(pred['percentage_spread']), 
+            return (float(pred['percentage_spread']),
                     int(pred['direction']),
                     int(pred['n_tick_forward']),
                     str(result['base']),
                     str(result['quote']))
         else:
-            logging.error(f"[layer2] strategy: {self.strategy} is not implemented yet!")
+            logging.error(
+                f"[layer2] strategy: {self.strategy} is not implemented yet!")
         return None, None, None, base, quote
-    
+
     def select_direction(self, percentage_arr: list) -> Tuple[float, float]:
         """ Function to select the trade direction based on the
             percentage spread array, bet threshold and safety deviation.
@@ -151,25 +166,31 @@ class Strategy():
         max_pred = np.max(percentage_arr)
         min_pred = np.min(percentage_arr)
         # long-tendency if max_pred > bet_threshold
-        margin_long = max_pred - self.long_spread    
+        margin_long = max_pred - self.long_spread
         # short-tendency if min_pred < -bet_threshold
-        margin_short = min_pred + self.short_spread  
+        margin_short = min_pred + self.short_spread
         # Option: LONG only
-        if (margin_long > 0) and (margin_short > 0): direction = 'long'
+        if (margin_long > 0) and (margin_short > 0):
+            direction = 'long'
         # Option: SHORT only
-        elif (margin_long < 0) and (margin_short < 0): direction = 'short'
+        elif (margin_long < 0) and (margin_short < 0):
+            direction = 'short'
         # Option: Available for both LONG and SHORT
         elif margin_long > 0 and margin_short < 0:
-            direction = 'short' if np.abs(margin_short) > np.abs(margin_long) else 'long'
-        else: direction = None
+            direction = 'short' if np.abs(margin_short) > np.abs(
+                margin_long) else 'long'
+        else:
+            direction = None
         # ensure that within predicted spreads it will not move
         # above the allowed maximum drawdowns from both directions
-        if direction == 'long' and all(predicted_spread > (-1 * self.long_max_drawdown)):
+        if direction == 'long' and all(
+                predicted_spread > (-1 * self.long_max_drawdown)):
             return float(np.abs(max_pred)), 1
-        elif direction == 'short' and all(predicted_spread < self.short_max_drawdown):
+        elif direction == 'short' and all(
+                predicted_spread < self.short_max_drawdown):
             return float(np.abs(min_pred)), 0
         return None, None
-    
+
     def save_metrics(self, start: float, symbol: str):
         """ Will save metrics of running specific symbol.
 
@@ -192,21 +213,24 @@ class Strategy():
                 total_execution_time=execution_time)
         else:
             count = self.metrics[symbol]['count'] + 1
-            total_execution_time = self.metrics[symbol]['total_execution_time'] + execution_time
+            total_execution_time = self.metrics[symbol][
+                                       'total_execution_time'] + execution_time
             self.metrics[symbol].update(
                 dict(
                     last_execution_time=execution_time,
                     last_utc_timestamp=utctime,
                     count=count,
-                    average_execution_time=round(total_execution_time/count, 2),
+                    average_execution_time=round(total_execution_time / count,
+                                                 2),
                     total_execution_time=round(total_execution_time, 2)
                 )
             )
         if self.metrics[symbol]['count'] % self.log_every == 0:
-            metrics = ", ".join([f"{key} : {value}" 
-                for key, value in self.metrics[symbol].items()])
+            metrics = ", ".join([f"{key} : {value}"
+                                 for key, value in
+                                 self.metrics[symbol].items()])
             logging.info(f"[metrics] strategy-{self.name}, symbol: {symbol}, "
-                f"metrics: {metrics}, metrics-reset-every {self.log_every} times.")
+                         f"metrics: {metrics}, metrics-reset-every {self.log_every} times.")
             # reset the count to 1 to avoid memory leak
             self.metrics[symbol] = dict(
                 last_execution_time=execution_time,
@@ -214,7 +238,7 @@ class Strategy():
                 count=1,
                 average_execution_time=execution_time,
                 total_execution_time=execution_time)
-    
+
     def is_valid_buffer(self, symbol: str) -> bool:
         """ Will check if the current time is above the buffer seconds
             if so add timedelta to it and return that its valid. If not,
@@ -232,14 +256,15 @@ class Strategy():
                 above the buffer seconds from prev
                 inference time.
         """
-        if symbol in self.buffers: 
+        if symbol in self.buffers:
             # check if the time surpasses the buffer time
             if datetime.utcnow() >= self.buffers[symbol]:
                 self.buffers[symbol] += timedelta(seconds=self.buffer)
                 return True
-        else: 
+        else:
             # initialize the time buffer 
-            self.buffers[symbol] = datetime.utcnow() + timedelta(seconds=self.buffer)
+            self.buffers[symbol] = datetime.utcnow() + timedelta(
+                seconds=self.buffer)
             return True
         return False
 
@@ -252,6 +277,7 @@ class HeikinAshiBase(Strategy):
         -----
         Will act as the base class for all Heikin-Ashi strategy.
     """
+
     def __init__(self,
                  name: str,
                  strategy: StrategyType,
@@ -338,9 +364,10 @@ class HeikinAshiBase(Strategy):
                                      symbol="ticker",
                                      taker_buy_base_vol="taker_buy_asset_vol"),
                         inplace=True)
-        clean_df = clean_df[['open', 'high', 'low', 'close', 'volume', 'close_time',
-                             'quote_asset_volume', 'number_of_trades', 'taker_buy_asset_vol',
-                             'taker_buy_quote_vol', 'datetime', 'ticker', 'interval']]
+        clean_df = clean_df[
+            ['open', 'high', 'low', 'close', 'volume', 'close_time',
+             'quote_asset_volume', 'number_of_trades', 'taker_buy_asset_vol',
+             'taker_buy_quote_vol', 'datetime', 'ticker', 'interval']]
 
         last_price = clean_df.iloc[-1].close
         open_price = clean_df.iloc[-1].open
@@ -406,7 +433,8 @@ class HeikinAshiBase(Strategy):
         """ Connect to layer 2 and inference to specific model. """
         raise NotImplementedError()
 
-    def calculate_heikin_ashi_trend(self, message: pubsub_v1.subscriber.message.Message):
+    def calculate_heikin_ashi_trend(self,
+                                    message: pubsub_v1.subscriber.message.Message):
         """ This function calculates the buy and sell signals based on Coinsspor Heikin Ashi Tradingview signals.
 
             Parameters
@@ -431,27 +459,35 @@ class HeikinAshiBase(Strategy):
                 # awaiting for a result from running strategy
 
                 # run a separate thread to run startegy
-                klines = pd.DataFrame(json.loads(message.data.decode('utf-8'))['data'])
+                klines = pd.DataFrame(
+                    json.loads(message.data.decode('utf-8'))['data'])
                 ha_dataframe = self.format_dataframe(klines)
 
                 # ohlc4 is a tradingview variable. It is the average of the OHLC value
-                ohlc4 = (ha_dataframe['open'] + ha_dataframe['high'] + ha_dataframe['low'] + ha_dataframe[
-                    'close']) / 4
+                ohlc4 = (ha_dataframe['open'] + ha_dataframe['high'] +
+                         ha_dataframe['low'] + ha_dataframe[
+                             'close']) / 4
 
                 # calculate the heiken ashi candles and rename the columns so that we can calculate the EMA
                 heikin_ashi_klines = ha_dataframe.ta.ha()
                 heikin_ashi_klines = heikin_ashi_klines.rename(
-                    columns={'HA_open': 'open', 'HA_high': 'high', 'HA_low': 'low', 'HA_close': 'close'})
+                    columns={'HA_open': 'open', 'HA_high': 'high',
+                             'HA_low': 'low', 'HA_close': 'close'})
 
                 # get the latest heikin-ashi candle of the specific symbol
-                ha_candles = heikin_ashi_klines["close"] - heikin_ashi_klines["open"]
+                ha_candles = heikin_ashi_klines["close"] - heikin_ashi_klines[
+                    "open"]
                 self.ha_candle[symbol] = 1 if ha_candles.iloc[-1] > 0 else -1
 
                 # start calculation. See tradingview for reference
                 hac = pd.DataFrame((ohlc4 + heikin_ashi_klines['open'].fillna(0)
-                                    + pd.concat([ha_dataframe['high'], heikin_ashi_klines['open'].fillna(0)]).max(
+                                    + pd.concat([ha_dataframe['high'],
+                                                 heikin_ashi_klines[
+                                                     'open'].fillna(0)]).max(
                             level=0)
-                                    + pd.concat([ha_dataframe['low'], heikin_ashi_klines['open'].fillna(0)]).min(
+                                    + pd.concat([ha_dataframe['low'],
+                                                 heikin_ashi_klines[
+                                                     'open'].fillna(0)]).min(
                             level=0)) / 4,
                                    columns=['close'])
                 ema1 = pd.DataFrame(hac.ta.ema(length=self.ha_ema_len)).rename(
@@ -470,7 +506,8 @@ class HeikinAshiBase(Strategy):
                 tma2 = 3 * ema4 - 3 * ema5 + ema6
                 ipek = tma1 - tma2
                 yasin = tma1 + ipek
-                hlc3 = pd.DataFrame((ha_dataframe['high'] + ha_dataframe['low'] + ha_dataframe['close']) / 3,
+                hlc3 = pd.DataFrame((ha_dataframe['high'] + ha_dataframe[
+                    'low'] + ha_dataframe['close']) / 3,
                                     columns=['close'])
                 ema7 = pd.DataFrame(hlc3.ta.ema(length=self.ha_ema_len)).rename(
                     columns={f'EMA_{self.ha_ema_len}': 'close'})
@@ -479,11 +516,14 @@ class HeikinAshiBase(Strategy):
                 ema9 = pd.DataFrame(ema8.ta.ema(length=self.ha_ema_len)).rename(
                     columns={f'EMA_{self.ha_ema_len}': 'close'})
                 tma3 = 3 * ema7 - 3 * ema8 + ema9
-                ema10 = pd.DataFrame(tma3.ta.ema(length=self.ha_ema_len)).rename(
+                ema10 = pd.DataFrame(
+                    tma3.ta.ema(length=self.ha_ema_len)).rename(
                     columns={f'EMA_{self.ha_ema_len}': 'close'})
-                ema11 = pd.DataFrame(ema10.ta.ema(length=self.ha_ema_len)).rename(
+                ema11 = pd.DataFrame(
+                    ema10.ta.ema(length=self.ha_ema_len)).rename(
                     columns={f'EMA_{self.ha_ema_len}': 'close'})
-                ema12 = pd.DataFrame(ema11.ta.ema(length=self.ha_ema_len)).rename(
+                ema12 = pd.DataFrame(
+                    ema11.ta.ema(length=self.ha_ema_len)).rename(
                     columns={f'EMA_{self.ha_ema_len}': 'close'})
                 tma4 = 3 * ema10 - 3 * ema11 + ema12
 
@@ -563,9 +603,323 @@ class HeikinAshiBase(Strategy):
                 return True
         else:
             # initialize the time buffer
-            self.ha_cooldowns[symbol] = datetime.utcnow() + timedelta(seconds=self.ha_cooldown)
+            self.ha_cooldowns[symbol] = datetime.utcnow() + timedelta(
+                seconds=self.ha_cooldown)
             return True
         return False
+
+
+class HeikinAshiFractionalDifference(HeikinAshiBase):
+    """ A strategy which uses fractional differencing for feature engineering
+    """
+
+    def __init__(self,
+                 long_ttp: "float or list",
+                 short_ttp: "float or list",
+                 long_spread: float,
+                 short_spread: float,
+                 pairs: dict,
+                 log_every: int,
+                 expiration_minutes: int = 240):
+        super(HeikinAshiFractionalDifference, self).__init__(
+            name=str(StrategyType.HEIKIN_ASHI_FRAC_DIFF),
+            strategy=StrategyType.HEIKIN_ASHI_FRAC_DIFF,
+            description="Heikin Ashi Random Forest Long vs. Short strategy.",
+            endpoint="",
+            long_spread=long_spread,
+            long_ttp=long_ttp,
+            short_spread=short_spread,
+            short_ttp=short_ttp,
+            pairs=pairs,
+            log_every=log_every,
+            expiration_minutes=expiration_minutes
+            )
+        self.prev_ha_trend = {}
+        self.interval_s = {"15m": 900,
+                           "1h": 3600}
+        self.models = self.load_models()
+
+    def load_models(self) -> dict:
+        """ Load the models for this strategy
+
+            Returns
+            -------
+            `dict`
+                {"long": {"BTC": btc_model, "ETH": eth_model},
+                 "short": {"BTC": btc_model, "ETH": eth_model}}
+
+        """
+        models = {"long": {}, "short": {}}
+        for direction in ["long", "short"]:
+            for pair in self.pairs[direction]:
+                filename = f"RFClassifier_{pair}"
+                loaded_model = pickle.load(open(filename, 'rb'))
+                models[direction].update({pair: loaded_model})
+        return models
+
+    def scout(self,
+              base: str,
+              quote: str,
+              dataframe: pd.DataFrame,
+              callback: callable):
+        """ Will scout for potential market trigger from heikin ashi fractional
+            difference. Each time the heikin-ashi coinsspor parameter changes its
+            direction, the function calls the Random Forest model to determine
+            if the signal should be taken or not.
+
+            Parameters
+            ----------
+            base: `str`
+                The base pair.
+            quote: `str`
+                The quote pair.
+            dataframe: `pd.DataFrame`
+                The klines to run technical analysis on.
+            callback: `callable`
+                The closing signal callback.
+
+            Returns
+            -------
+            `Union[Signal, None]`
+                Will return a Signal object or None.
+        """
+        start = time.time()
+        signal = False
+        _spread = None
+        _n_tick = None
+        clean_df = dataframe.copy()
+        # format the clean df before inference
+        clean_df.rename(columns=dict(timeframe="interval",
+                                     symbol="ticker",
+                                     taker_buy_base_vol="taker_buy_asset_vol"),
+                        inplace=True)
+        clean_df = clean_df[
+            ['open', 'high', 'low', 'close', 'volume', 'close_time',
+             'quote_asset_volume', 'number_of_trades', 'taker_buy_asset_vol',
+             'taker_buy_quote_vol', 'datetime', 'ticker', 'interval']]
+        pair = f"{base}{quote}".upper()
+        last_price = clean_df.iloc[-1].close
+
+        # fill the previous ha trend if it is empty
+        if not self.prev_ha_trend:
+            self.prev_ha_trend.update(self.ha_trend)
+
+        else:
+            interval = dataframe.iloc[-1]["interval"]
+            candle_age = ((dataframe.iloc[-1]["close_time"] / 1e6)
+                          - datetime.now(tz=timezone.utc).timestamp())
+
+            if (self.ha_trend[pair] == 1
+                    and self.prev_ha_trend[pair] == -1
+                    and candle_age > self.interval_s[interval] / 2
+                    and pair in self.pairs["long"]):
+                prediction, ttp, _spread, _n_tick, _direction = self.layer2(
+                    base=base, quote=quote,
+                    data=clean_df.to_dict('list'),
+                    mode=self.mode,
+                    ha_trend=self.ha_trend[pair])
+
+                self.save_metrics(start, f"{base}{quote}")
+                signal = True if prediction else False
+
+            elif (self.ha_trend[pair] == -1
+                  and self.prev_ha_trend[pair] == 1
+                  and candle_age > self.interval_s[interval] / 2
+                  and pair in self.pairs["short"]):
+                prediction = self.layer2(
+                    base=base, quote=quote,
+                    data=clean_df.to_dict('list'),
+                    mode=self.mode,
+                    ha_trend=self.ha_trend[pair])
+
+                self.save_metrics(start, f"{base}{quote}")
+                signal = True if prediction else False
+
+            # update the previous heikin ashi trend, so that we can use it for
+            # the next klines data
+            self.prev_ha_trend.update(self.ha_trend)
+
+        return Signal(
+            base=base,
+            quote=quote,
+            take_profit=(self.long_ttp
+                         if self.ha_trend[pair] == 1
+                         else self.short_ttp),
+            spread=_spread,
+            buffer=_n_tick,
+            purchase_price=float(last_price),
+            last_price=float(last_price),
+            direction=1 if self.ha_trend[pair] == 1 else 0,
+            callback=callback,
+            n_tick_forward=_n_tick,
+            expiration_minutes=self.expiration_minutes
+        ) if signal else None
+
+    def layer2(self,
+               base: str,
+               quote: str,
+               data: pd.DataFrame,
+               mode: str,
+               ha_trend: int) -> bool:
+        """ This function takes the kline input and predict if a should be
+            should opened
+
+            Parameters
+            ----------
+            base: `str`
+            quote: `str`
+            data: `list`
+            mode: `str`
+                dev or prod
+            ha_trend: `int`
+                current 15m heikin-ashi direction
+
+            Returns
+            -------
+            `Tuple`
+                the prediction result. True if a position should be opened
+
+        """
+        # define all the necessary features
+        ema_slope_ = EMASlope()
+        ema_relationship_ = EMARelationship()
+        rvol_ = RVOL()
+        vwap_ = VWAP()
+        cci_ = CCI()
+        adx_ = AverageDirectionalIndex()
+        dm_ = DirectionalMovement()
+        bollingermidband_ = BollingerMidBand()
+
+        # combine the features
+        features = [ema_slope_.preprocess(data),
+                    ema_relationship_.preprocess(data),
+                    rvol_.preprocess(data),
+                    vwap_.preprocess(data),
+                    cci_.preprocess(data),
+                    adx_.preprocess(data),
+                    dm_.preprocess(data),
+                    bollingermidband_.preprocess(data)]
+        aggregated_data = self.aggregate_features(data, features)
+
+        # removed non-numerical columns
+        float_cols = list(aggregated_data.columns[
+                              aggregated_data.dtypes == "float64"])
+        aggregated_data = aggregated_data[float_cols]
+        close_series = aggregated_data.close
+
+        if self.is_stationary(close_series):
+            model_input = aggregated_data[-200:].values
+
+        else:
+            d = brentq(f=self.find_d_rolling, a=0, b=1, args=(close_series, ),
+                       full_output=False)
+            frac_df = self.fraction_differencing(data, columns=float_cols, d=d)
+            model_input = frac_df[:-200].values
+
+        direction = "long" if ha_trend == 1 else "short"
+        prediction = self.models[direction][f"{base}{quote}"].predict(
+            model_input)
+
+        return prediction
+
+    def fraction_differencing(self, data: pd.DataFrame,
+                              columns: list, d: float):
+        """ This function performs fractional differencing on the input data
+
+            Parameters
+            ----------
+            data: `pd.DataFrame`
+                full time-series data to fractionally differentiate
+            columns: `list`
+                the columns to fractionally differentiate
+            d: `float`
+                fractional difference order
+
+            Returns
+            -------
+            `pd.DataFrame`
+
+        """
+        for col in columns:
+            if col == "close":
+                continue
+            series = data[col]
+            if not self.is_stationary(series):
+                frac_series = fracdiff(series.values, order=d, tau=1e-2)
+                data[col] = frac_series
+            else:
+                continue
+        # drop na
+        data.dropna(axis=0, inplace=True)
+        return data
+
+    def find_d_rolling(self, d, series: pd.Series) -> float:
+        """
+
+            Parameters
+            ----------
+            d: `float`
+                fractional difference order
+            series: `pd.Series`
+                series to fractionally differentiate
+
+            Returns
+            -------
+            `float`
+                the value to reduce to zero, which is the difference between
+                the p value and significance
+
+        """
+        significance = 5e-2
+        frac_series = fracdiff(series.values, order=d, tau=1e-2)
+        skip = len(frac_series[np.isnan(frac_series)])
+        adf = adfuller(frac_series[skip:], maxlag=1, autolag=None)
+        p_val = adf[1]
+
+        return p_val - significance
+
+    def is_stationary(self, series: pd.Series) -> bool:
+        """ Check if a pandas series is stationary
+
+        Parameters
+        ----------
+        series: `pd.Series`
+            the series to check
+
+        Returns
+        -------
+        `bool`
+            True if the series is stationary
+        """
+        significance = 5e-2
+        adf = adfuller(series, maxlag=1, autolag=None)
+        p_val = adf[1]
+        return p_val <= significance
+
+    def aggregate_features(self, data: pd.DataFrame, features: list):
+        """ Combines additional features to the original dataframe
+
+            Parameters
+            ----------
+            data: `pd.DataFrame`
+                kline dataframe
+            features: `list`
+                list of technical analysis features
+
+            Returns
+            -------
+            `pd.DataFrame`
+                Aggregated Features
+
+        """
+        df = data.copy()
+        for feature in features:
+            df_feature = pd.DataFrame(feature)
+            df = pd.concat([df, df_feature], axis=1)
+
+        # drop na
+        df.dropna(axis=0, inplace=True)
+        return df
 
 
 class HeikinAshiRegression(HeikinAshiBase):
@@ -573,6 +927,7 @@ class HeikinAshiRegression(HeikinAshiBase):
         will scout for potential actionable
         intelligence based on a specific market behavior.
     """
+
     def __init__(self,
                  mode: str,
                  kaiforecast_version: Optional[str],
@@ -643,8 +998,8 @@ class HeikinAshiRegression(HeikinAshiBase):
             pred = reg_result['predictions']
 
             # use the SUPER_TREND_SQUEEZE method
-            #if 'percentage_arr' not in pred: return None, None, None, base, quote
-            #_spread, _direction = self.select_direction(pred['percentage_arr'])
+            # if 'percentage_arr' not in pred: return None, None, None, base, quote
+            # _spread, _direction = self.select_direction(pred['percentage_arr'])
             _spread = float(pred['percentage_spread'])
             _direction = int(pred['direction'])
             _n_ticks = int(pred['n_tick_forward'])
@@ -672,6 +1027,7 @@ class HeikinAshiHybrid(HeikinAshiBase):
         will scout for potential actionable
         intelligence based on a specific market behavior.
     """
+
     def __init__(self,
                  mode: str,
                  kaiforecast_version: Optional[str],
@@ -766,7 +1122,8 @@ class SuperTrendSqueeze(Strategy):
         will scout for potential actionable
         intelligence based on a specific market behavior. 
     """
-    def __init__(self, 
+
+    def __init__(self,
                  endpoint: str,
                  long_spread: float,
                  long_ttp: float,
@@ -796,7 +1153,7 @@ class SuperTrendSqueeze(Strategy):
                 Log the metrics from layer 2 every n-iteration.
         """
         super(SuperTrendSqueeze, self).__init__(
-            name=str(StrategyType.SUPER_TREND_SQUEEZE), 
+            name=str(StrategyType.SUPER_TREND_SQUEEZE),
             strategy=StrategyType.SUPER_TREND_SQUEEZE,
             description="SuperTrend x Squeeze Long vs. Short strategy.",
             endpoint=endpoint,
@@ -815,31 +1172,32 @@ class SuperTrendSqueeze(Strategy):
         self.supertrend_mul, self.sma = 0.6, 20
         self._technical_analysis = [
             {
-                "kind": "squeeze", 
+                "kind": "squeeze",
                 "lazybear": True
             },
             {
-                "kind": "ema", 
+                "kind": "ema",
                 "length": self.ema
             },
             {
-                "kind": "supertrend", 
-                "length": self.supertrend_len, 
+                "kind": "supertrend",
+                "length": self.supertrend_len,
                 "multiplier": self.supertrend_mul
             },
             {
-                "kind": "sma", 
-                "close": "volume", 
-                "length": self.sma, 
+                "kind": "sma",
+                "close": "volume",
+                "length": self.sma,
                 "prefix": "VOLUME"
             }]
         self.technical_analysis = ta.Strategy(name=self.name,
-            description=self.description, ta=self._technical_analysis)
-    
-    def scout(self, 
-              base: str, 
+                                              description=self.description,
+                                              ta=self._technical_analysis)
+
+    def scout(self,
+              base: str,
               quote: str,
-              dataframe: pd.DataFrame, 
+              dataframe: pd.DataFrame,
               callback: callable) -> Union[Signal, None]:
         """ Will scout for potential market trigger from  SuperTrend and 
             Momentum Squeeze, if triggered run spread and direction forecast 
@@ -878,9 +1236,10 @@ class SuperTrendSqueeze(Strategy):
         clean_df.rename(columns=dict(
             timeframe="interval", symbol="ticker",
             taker_buy_base_vol="taker_buy_asset_vol"), inplace=True)
-        clean_df = clean_df[['open', 'high', 'low', 'close', 'volume', 'close_time',
-            'quote_asset_volume', 'number_of_trades', 'taker_buy_asset_vol',
-            'taker_buy_quote_vol', 'datetime', 'ticker', 'interval']]
+        clean_df = clean_df[
+            ['open', 'high', 'low', 'close', 'volume', 'close_time',
+             'quote_asset_volume', 'number_of_trades', 'taker_buy_asset_vol',
+             'taker_buy_quote_vol', 'datetime', 'ticker', 'interval']]
         ta_dataframe = dataframe.copy()
         # retrieve the technical indicators
         ta_dataframe.ta.strategy(self.technical_analysis)
@@ -894,27 +1253,27 @@ class SuperTrendSqueeze(Strategy):
         pair = f"{base}{quote}".upper()
         ttp = 0
         # if direction is long and squeeze is off and green candle
-        if (direction == 1 and squeeze == 1 and 
-            pair in self.pairs['long'] and last_price > open_price):
+        if (direction == 1 and squeeze == 1 and
+                pair in self.pairs['long'] and last_price > open_price):
             # inference to layer 2
             _spread, _direction, _n_tick, base, quote = self.layer2(
                 base=base, quote=quote, data=clean_df.to_dict('list'))
             if _spread is None or _direction is None: return None
             # ensure that spread is above threshold and direction matches.
-            if _spread >= self.long_spread and _direction == 1: 
+            if _spread >= self.long_spread and _direction == 1:
                 ttp = self.long_ttp
                 signal = True
             # record the ending time of analysis
             self.save_metrics(start, f"{base}{quote}")
         # else if direction is short and squeeze is off and red candle
-        elif (direction == -1 and squeeze == 1 and 
+        elif (direction == -1 and squeeze == 1 and
               pair in self.pairs['short'] and last_price < open_price):
             # inference to layer 2
             _spread, _direction, _n_tick, base, quote = self.layer2(
                 base=base, quote=quote, data=clean_df.to_dict('list'))
             if _spread is None or _direction is None: return None
             # ensure that spread is above threshold and direction matches.
-            if _spread >= self.short_spread and _direction == 0: 
+            if _spread >= self.short_spread and _direction == 0:
                 ttp = self.short_ttp
                 signal = True
             # record the ending time of analysis
@@ -940,6 +1299,7 @@ class MaxDrawdownSpread(Strategy):
         will scout for potential actionable
         intelligence based on specific market behavior.
     """
+
     def __init__(self,
                  endpoint: str,
                  long_spread: float,
@@ -1000,10 +1360,10 @@ class MaxDrawdownSpread(Strategy):
         self.buffer = buffer
         self.buffers = {}
 
-    def scout(self, 
-              base: str, 
+    def scout(self,
+              base: str,
               quote: str,
-              dataframe: pd.DataFrame, 
+              dataframe: pd.DataFrame,
               callback: callable) -> Union[Signal, None]:
         """ Will scout for potential market trigger from Momentum Squeeze, 
             if triggered run spread and direction forecast from Layer 2. 
@@ -1042,9 +1402,10 @@ class MaxDrawdownSpread(Strategy):
         clean_df.rename(columns=dict(
             timeframe="interval", symbol="ticker",
             taker_buy_base_vol="taker_buy_asset_vol"), inplace=True)
-        clean_df = clean_df[['open', 'high', 'low', 'close', 'volume', 'close_time',
-            'quote_asset_volume', 'number_of_trades', 'taker_buy_asset_vol',
-            'taker_buy_quote_vol', 'datetime', 'ticker', 'interval']]
+        clean_df = clean_df[
+            ['open', 'high', 'low', 'close', 'volume', 'close_time',
+             'quote_asset_volume', 'number_of_trades', 'taker_buy_asset_vol',
+             'taker_buy_quote_vol', 'datetime', 'ticker', 'interval']]
         high_price = clean_df.iloc[-1].high
         low_price = clean_df.iloc[-1].low
         open_price = clean_df.iloc[-1].open
@@ -1065,13 +1426,14 @@ class MaxDrawdownSpread(Strategy):
             if _spread is None or _direction is None: return None
             # ensure that direction and spread prediction
             # is above specified spread for layer 1
-            if (_direction == 1 and pair in self.pairs['long'] 
-                and last_price > open_price):
+            if (_direction == 1 and pair in self.pairs['long']
+                    and last_price > open_price):
                 ttp = self.long_ttp
             elif (_direction == 0 and pair in self.pairs['short']
-                and last_price < open_price): 
+                  and last_price < open_price):
                 ttp = self.short_ttp
-            else: return None
+            else:
+                return None
             signal = True
             # record the ending time of analysis
             self.save_metrics(start, f"{base}/{quote}")
@@ -1095,6 +1457,7 @@ class MaxDrawdownSuperTrendSpread(Strategy):
         will scout for potential actionable
         intelligence based on specific market behavior.
     """
+
     def __init__(self,
                  endpoint: str,
                  long_spread: float,
@@ -1156,19 +1519,20 @@ class MaxDrawdownSuperTrendSpread(Strategy):
         self.supertrend_mul, self.supertrend_len = 0.6, 24
         self._technical_analysis = [
             dict(kind="supertrend",
-                length=self.supertrend_len,
-                multiplier=self.supertrend_mul)
+                 length=self.supertrend_len,
+                 multiplier=self.supertrend_mul)
         ]
         self.technical_analysis = ta.Strategy(name=self.name,
-            description=self.description, ta=self._technical_analysis)
+                                              description=self.description,
+                                              ta=self._technical_analysis)
         # the buffer second before next inference
         self.buffer = buffer
         self.buffers = {}
 
-    def scout(self, 
-              base: str, 
+    def scout(self,
+              base: str,
               quote: str,
-              dataframe: pd.DataFrame, 
+              dataframe: pd.DataFrame,
               callback: callable) -> Union[Signal, None]:
         """ Will scout for potential market trigger from ticker spread, 
             if triggered run spread and direction forecast from Layer 2. 
@@ -1207,9 +1571,10 @@ class MaxDrawdownSuperTrendSpread(Strategy):
         clean_df.rename(columns=dict(
             timeframe="interval", symbol="ticker",
             taker_buy_base_vol="taker_buy_asset_vol"), inplace=True)
-        clean_df = clean_df[['open', 'high', 'low', 'close', 'volume', 'close_time',
-            'quote_asset_volume', 'number_of_trades', 'taker_buy_asset_vol',
-            'taker_buy_quote_vol', 'datetime', 'ticker', 'interval']]
+        clean_df = clean_df[
+            ['open', 'high', 'low', 'close', 'volume', 'close_time',
+             'quote_asset_volume', 'number_of_trades', 'taker_buy_asset_vol',
+             'taker_buy_quote_vol', 'datetime', 'ticker', 'interval']]
         ta_dataframe = dataframe.copy()
         # retrieve the technical indicators
         ta_dataframe.ta.strategy(self.technical_analysis)
@@ -1239,13 +1604,14 @@ class MaxDrawdownSuperTrendSpread(Strategy):
             # ensure that direction and spread prediction
             # is above specified spread for layer 1
             # and pred direction matches supertrend direction
-            if (_direction == 1 and pair in self.pairs['long'] 
-                and direction == 1 and prev_direction == 1):
+            if (_direction == 1 and pair in self.pairs['long']
+                    and direction == 1 and prev_direction == 1):
                 ttp = self.long_ttp
             elif (_direction == 0 and pair in self.pairs['short']
-                and direction == -1 and prev_direction == -1): 
+                  and direction == -1 and prev_direction == -1):
                 ttp = self.short_ttp
-            else: return None
+            else:
+                return None
             signal = True
             # record the ending time of analysis
             self.save_metrics(start, f"{base}/{quote}")
@@ -1270,6 +1636,7 @@ class MaxDrawdownSqueeze(Strategy):
         will scout for potential actionable
         intelligence based on specific market behavior.
     """
+
     def __init__(self,
                  endpoint: str,
                  long_spread: float,
@@ -1325,12 +1692,13 @@ class MaxDrawdownSqueeze(Strategy):
         self.short_max_drawdown = short_max_drawdown
         self._technical_analysis = [dict(kind="squeeze", lazybear=True)]
         self.technical_analysis = ta.Strategy(name=self.name,
-            description=self.description, ta=self._technical_analysis)
-    
-    def scout(self, 
-              base: str, 
+                                              description=self.description,
+                                              ta=self._technical_analysis)
+
+    def scout(self,
+              base: str,
               quote: str,
-              dataframe: pd.DataFrame, 
+              dataframe: pd.DataFrame,
               callback: callable) -> Union[Signal, None]:
         """ Will scout for potential market trigger from Momentum Squeeze, 
             if triggered run spread and direction forecast from Layer 2. 
@@ -1369,9 +1737,10 @@ class MaxDrawdownSqueeze(Strategy):
         clean_df.rename(columns=dict(
             timeframe="interval", symbol="ticker",
             taker_buy_base_vol="taker_buy_asset_vol"), inplace=True)
-        clean_df = clean_df[['open', 'high', 'low', 'close', 'volume', 'close_time',
-            'quote_asset_volume', 'number_of_trades', 'taker_buy_asset_vol',
-            'taker_buy_quote_vol', 'datetime', 'ticker', 'interval']]
+        clean_df = clean_df[
+            ['open', 'high', 'low', 'close', 'volume', 'close_time',
+             'quote_asset_volume', 'number_of_trades', 'taker_buy_asset_vol',
+             'taker_buy_quote_vol', 'datetime', 'ticker', 'interval']]
         ta_dataframe = dataframe.copy()
         # retrieve the technical indicators
         ta_dataframe.ta.strategy(self.technical_analysis)
@@ -1390,9 +1759,12 @@ class MaxDrawdownSqueeze(Strategy):
             if _spread is None or _direction is None: return None
             # ensure that direction and spread prediction
             # is above specified spread for layer 1
-            if _direction == 1 and pair in self.pairs['long']: ttp = self.long_ttp
-            elif _direction == 0 and pair in self.pairs['short']: ttp = self.short_ttp
-            else: return None
+            if _direction == 1 and pair in self.pairs['long']:
+                ttp = self.long_ttp
+            elif _direction == 0 and pair in self.pairs['short']:
+                ttp = self.short_ttp
+            else:
+                return None
             signal = True
             # record the ending time of analysis
             self.save_metrics(start, f"{base}/{quote}")
@@ -1417,7 +1789,8 @@ __REGISTRY = {
     str(StrategyType.MAX_DRAWDOWN_SPREAD): MaxDrawdownSpread,
     str(StrategyType.MAX_DRAWDOWN_SUPER_TREND_SPREAD): MaxDrawdownSuperTrendSpread,
     str(StrategyType.HEIKIN_ASHI_HYBRID): HeikinAshiHybrid,
-    str(StrategyType.HEIKIN_ASHI_REGRESSION): HeikinAshiRegression
+    str(StrategyType.HEIKIN_ASHI_REGRESSION): HeikinAshiRegression,
+    str(StrategyType.HEIKIN_ASHI_FRAC_DIFF): HeikinAshiFractionalDifference
 }
 
 
@@ -1435,6 +1808,8 @@ def get_strategy(strategy: StrategyType) -> Union[Strategy, None]:
             A strategy that inherits `Strategy` class.
     """
     strategy = str(strategy)
-    if strategy in __REGISTRY: return __REGISTRY[strategy]
-    else: raise KeyError(f"Strategy {strategy} not found, only: "
-        f"{__REGISTRY.keys()} available!")
+    if strategy in __REGISTRY:
+        return __REGISTRY[strategy]
+    else:
+        raise KeyError(f"Strategy {strategy} not found, only: "
+                       f"{__REGISTRY.keys()} available!")
