@@ -38,11 +38,11 @@ class Signal():
                  callback: callable,
                  n_tick_forward: int,
                  buffer: int = 24,
-                 realized_profit : float = 0.0,
+                 realized_profit: float = 0.0,
+                 checkpoint_trailing_thresh: float = 0.4,
                  id: str = None,
                  created_at: int = None,
                  expired_at: int = None,
-                 aggressive_ha_threshold: float = None,
                  status: SignalStatus = SignalStatus.NEW,
                  expiration_minutes: Optional[Union[int, float]] = None,
                  stop_loss: Optional[float] = None):
@@ -116,17 +116,7 @@ class Signal():
         self._status = status
         self.buffer = buffer
         self.realized_profit = realized_profit
-
-        # specify threshold if aggressive ha threshold is used.
-        self.aggressive_ha_threshold = aggressive_ha_threshold
-        if aggressive_ha_threshold:
-            self.aggressive_ha_threshold_price = \
-                (purchase_price * (1 + aggressive_ha_threshold)
-                 if direction == 1
-                 else purchase_price * (1 - aggressive_ha_threshold))
-        else:
-            self.aggressive_ha_threshold_price = np.inf if direction == 1 \
-                else -np.inf
+        self.checkpoint_trailing_thresh = checkpoint_trailing_thresh
 
         if expiration_minutes is None:
             expiration_minutes = (45 * (n_tick_forward + buffer))
@@ -205,20 +195,25 @@ class Signal():
 
         # if last price have gone above the exit price (LONG position profit)
         # or below (SHORT position profit)
-
         if (self.direction == 1 and last_price >= self.exit_price) or \
                 (self.direction == 0 and last_price <= self.exit_price):
             self.update_realized_profit(status=SignalStatus.COMPLETED)
-            logging.info(f"[completed] signal - symbol: {self.symbol}, "
-                         f"direction: {self.direction}, "
-                         f"realized-profit: {self.realized_profit}%")
-
             if type(self.take_profit) != list:
+                print(f"Take profit type: {type(self.take_profit)}")
+                logging.info(f"[completed] signal - symbol: {self.symbol}, "
+                             f"direction: {self.direction}, "
+                             f"realized-profit: {self.realized_profit}%")
                 self.callback(self)
             elif (type(self.take_profit) == list
                   and self.current_checkpoint == len(self.take_profit)):
+                logging.info(f"[completed] signal - symbol: {self.symbol}, "
+                             f"direction: {self.direction}, "
+                             f"realized-profit: {self.realized_profit}%")
                 self.callback(self)
             else:
+                logging.info(f"[checkpoint-exit {self.current_checkpoint}] signal - symbol: {self.symbol}, "
+                             f"direction: {self.direction}, "
+                             f"realized-profit: {self.realized_profit}%")
                 self.open()
         # check if time has surpassed expected expired date
         elif datetime.utcnow().timestamp() >= self.expired_at:
@@ -237,29 +232,15 @@ class Signal():
                          f"direction: {self.direction}, "
                          f"loss: {self.realized_profit}%")
             self.callback(self)
-        elif ((self.direction == 1 and last_price >= self.aggressive_ha_threshold_price)
-              or
-              (self.direction == 0 and last_price <= self.aggressive_ha_threshold_price)):
-            # update the stop price
-            self.stop_price = \
-                (self.purchase_price * (1 + (self.aggressive_ha_threshold / 2))
-                 if self.direction == 1
-                 else self.purchase_price * (
-                            1 - (self.aggressive_ha_threshold / 2)))
-
-            # change the aggressive ha threshold to infinity so that
-            # it won't get triggered anymore
-            self.aggressive_ha_threshold_price = np.inf if self.direction == 1 \
-                else -np.inf
-            logging.info(f"[aggressive-ha] signal - symbol: {self.symbol}, "
-                         f"direction: {self.direction}, "
-                         f"threshold triggered, will stop the position at "
-                         f"{self.stop_price}")
-            self.open()
         # signal is updated and back to open
-        else: self.open()
+        else: 
+            if (type(self.take_profit) == list 
+                    and self.stop_price 
+                    and last_price > self.stop_price + (self.checkpoint_trailing_thresh * self.purchase_price / 100)):
+                self.stop_price = last_price - (self.checkpoint_trailing_thresh * self.purchase_price / 100)
+            self.open()
         return self._status
-
+            
     def update_realized_profit(self, status: SignalStatus):
         """ Calculate the realized profit of a closed signal.
 
@@ -292,7 +273,9 @@ class Signal():
                         else (1 - (self.take_profit[self.current_checkpoint] / 100))
                     self.exit_price = self.purchase_price * tp
                     # add stop loss when the last price hits the original price
-                    self.stop_price = self.purchase_price * 1.01
+                    if self.stop_price is None:
+                        self.stop_price = (self.purchase_price * 1.001 if self.direction == 1 
+                                           else self.purchase_price * 0.999)
 
             elif (status == SignalStatus.EXPIRED
                   or status == SignalStatus.STOPPED):

@@ -10,6 +10,8 @@ from kaihft.databases import KaiRealtimeDatabase
 def main(
         n_klines: int,
         production: bool,
+        exp0a: bool,
+        exp1a: bool,
         timeframe: int,
         topic_path: str = 'klines-binance-v0'):
     """ Retrieve real-time binance data via websocket &
@@ -36,14 +38,15 @@ def main(
         topic_path = f"{topic_path}-{n_hour}h"
 
     # get the list of tickers for inference
+    if production: topic_path = f'prod-{topic_path}'; mode="prod"
+    elif exp0a: topic_path = f'exp0a-{topic_path}'; mode="exp0a"
+    elif exp1a: topic_path = f'exp1a-{topic_path}'; mode="exp1a"
+    else: topic_path = f'dev-{topic_path}'; mode="dev"
     database = KaiRealtimeDatabase()
-    mode = "prod" if production else "dev"
     pairs_ref = f"{mode}/pairs"
     logging.info(f"[{mode}-mode] [{channels[0]}] pairs db reference: {pairs_ref}")
-
     markets_long_short = database.get(pairs_ref)
     markets = list(set().union(markets_long_short['long'], markets_long_short['short']))
-    topic_path = f"{mode}-{topic_path}"
     logging.info(f"[{mode}-mode] {channels[0]}: {n_klines}-BINANCE-SPOT, "
                  f"topic: {topic_path}, markets: {markets}")
     # binance only allows 1024 subscriptions in one stream

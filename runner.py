@@ -6,6 +6,9 @@ import kaihft.services as services
 from kaihft.alerts import notify_failure
 from google.cloud import pubsub_v1
 from google.api_core import bidi
+import yaml
+import os
+
 
 # logging verbose mode
 logging.basicConfig(
@@ -57,13 +60,17 @@ def ticker_binance_futures(production, exp0a, exp1a, restart_every):
 @cli.command()
 @click.option('--klines', default=250, help='the length of historical klines back.')
 @click.option('--production', is_flag=True, help='publish messages to production topic.')
+@click.option('--exp0a', is_flag=True, help='publish & subscribe messages to exp0a topic.')
+@click.option('--exp1a', is_flag=True, help='publish & subscribe messages to exp1a topic.')
 @click.option('--timeframe', default=15, help='market timeframe to stream')
-@notify_failure
-def klines_binance_spot(klines, production, timeframe):
+# @notify_failure
+def klines_binance_spot(klines, production, exp0a, exp1a, timeframe):
     services.klines_binance_spot.main(
         n_klines=klines,
         production=production,
-        timeframe=timeframe)
+        timeframe=timeframe, 
+        exp0a=exp0a, 
+        exp1a=exp1a)
 
 @cli.command()
 @click.option('--klines', default=250, help='the length of historical klines back.')
@@ -110,17 +117,21 @@ def ticker_binance_usdm(production):
 @click.option('--exp0a', is_flag=True, help='Publish & subscribe messages to exp0a topic.')
 @click.option('--exp1a', is_flag=True, help='Publish & subscribe messages to exp1a topic.')
 @click.option('--strategy-params-path', default='', help='The path to json file which contains the params for the strategy')
-@notify_failure
+# @notify_failure
 def signal_binance_futures(strategy, version, log_every, log_metrics_every,
                            production, strategy_params_path, exp0a, exp1a):
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "credentials.json"
     if strategy_params_path == '':
         strategy_params = {}
-    else:
+    elif strategy_params_path.endswith(".yaml"):
+        with open(strategy_params_path, 'r') as file:
+            strategy_params = yaml.safe_load(file)["STRATEGY_PARAMS"]
+    elif strategy_params_path.endswith(".json"):
         with open(strategy_params_path, 'r') as fp:
             strategy_params = json.load(fp)
 
     services.signal_engine.main(
-        exchange='binance',
+        exchange="binance",
         strategy=strategy,
         production=production,
         exp0a=exp0a,

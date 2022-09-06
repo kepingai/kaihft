@@ -23,7 +23,10 @@ from statsmodels.tsa.stattools import adfuller
 from numpy_fracdiff import fracdiff
 from scipy.optimize import brentq
 import pickle
+import traceback
 
+
+pd.options.mode.chained_assignment = None
 
 class StrategyType(Enum):
     SUPER_TREND_SQUEEZE = "SUPER_TREND_SQUEEZE"
@@ -321,7 +324,10 @@ class HeikinAshiBase(Strategy):
                      f"EMA length: {ha_ema_len}.")
         # initialize the heikin-ashi trend dict
         self.ha_klines_counts = 1
-        self.ha_trend, self.ha_candle, self.ha_cooldowns = {}, {}, {}
+        self.ha_trend, self.ha_candle, self.ha_cooldowns, self.previous_ha_trend = {}, {}, {}, {}
+        traded_pairs = set(list(pairs["long"])+list(pairs["short"]))
+        self.ha_trend = {symbol: 0 for symbol in traded_pairs}
+        self.prev_ha_trend = {symbol: 0 for symbol in traded_pairs}
         self.ha_cooldown = 100  # second(s)
         for _, v in pairs.items():
             for p in v:
@@ -537,9 +543,22 @@ class HeikinAshiBase(Strategy):
 
                 # define trend for long and short positions
                 # if True, it means the model can go long. If False, the model can go short
-                trend = np.array(np.array(mavi) > np.array(kirmizi))
-
-                self.ha_trend[symbol] = 1 if np.all(trend[-2:]) else -1
+                uptrend = np.array(np.array(mavi) > np.array(kirmizi))
+                downtrend = np.array(np.array(kirmizi) > np.array(mavi))
+                
+                if np.all(uptrend[-2:]):
+                    self.ha_trend.update({symbol: 1})
+                elif np.all(downtrend[-2:]):     
+                    self.ha_trend.update({symbol: -1})
+                else:
+                    self.ha_trend.update({symbol: 0})
+                
+                if uptrend[-3]:
+                    self.prev_ha_trend.update({symbol: 1})
+                elif downtrend[-3]:
+                    self.prev_ha_trend.update({symbol: -1})
+                else:
+                    self.prev_ha_trend.update({symbol: 0})
 
             # restarting the pod if latency above 10 minute(s),
             # as the safety net to handle message flooding.
@@ -552,7 +571,9 @@ class HeikinAshiBase(Strategy):
             if self.ha_klines_counts % (self.log_every * 10) == 0:
                 logging.info(f"[ha_klines] cloud pub/sub messages running, "
                              f"latency: {seconds_passed} sec, last-symbol: "
-                             f"{symbol}, ha_trend: {self.ha_trend}")
+                             f"{symbol}, "
+                             f"ha_trend: {self.ha_trend} " 
+                             f"previous_ha_trend: {self.prev_ha_trend}")
                 # reset the signal counts to 1
                 self.ha_klines_counts = 1
             # add the counter for each message received
@@ -620,7 +641,14 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                  short_spread: float,
                  pairs: dict,
                  log_every: int,
-                 expiration_minutes: int = 240):
+                 ha_timeframe: str,
+                 model_timeframe: str,
+                 ha_ema_len: int,
+                 mode: str = "exp0a", 
+                 kaiforecast_version: str = "", 
+                 description: str = "Heikin-Ashi Buy and Sell Strategy by Coinsspor",
+                 endpoint: str = "",
+                 expiration_minutes: Optional[Union[int, float]] = 240):
         super(HeikinAshiFractionalDifference, self).__init__(
             name=str(StrategyType.HEIKIN_ASHI_FRAC_DIFF),
             strategy=StrategyType.HEIKIN_ASHI_FRAC_DIFF,
@@ -632,7 +660,12 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             short_ttp=short_ttp,
             pairs=pairs,
             log_every=log_every,
-            expiration_minutes=expiration_minutes
+            expiration_minutes=expiration_minutes, 
+            mode=mode, 
+            kaiforecast_version=kaiforecast_version, 
+            ha_timeframe=ha_timeframe, 
+            model_timeframe=model_timeframe, 
+            ha_ema_len=ha_ema_len
             )
         self.prev_ha_trend = {}
         self.interval_s = {"15m": 900,
@@ -652,7 +685,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
         models = {"long": {}, "short": {}}
         for direction in ["long", "short"]:
             for pair in self.pairs[direction]:
-                filename = f"RFClassifier_{pair}"
+                filename = f"models/RFClassifier_{pair.replace('USDT', '')}_{direction.upper()}.sav"
                 loaded_model = pickle.load(open(filename, 'rb'))
                 models[direction].update({pair: loaded_model})
         return models
@@ -685,8 +718,8 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
         """
         start = time.time()
         signal = False
-        _spread = None
-        _n_tick = None
+        _spread = 2
+        _n_tick = 8
         clean_df = dataframe.copy()
         # format the clean df before inference
         clean_df.rename(columns=dict(timeframe="interval",
@@ -699,46 +732,50 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
              'taker_buy_quote_vol', 'datetime', 'ticker', 'interval']]
         pair = f"{base}{quote}".upper()
         last_price = clean_df.iloc[-1].close
-
+        open_price = clean_df.iloc[-1].open
         # fill the previous ha trend if it is empty
-        if not self.prev_ha_trend:
-            self.prev_ha_trend.update(self.ha_trend)
-
+        if (pair not in self.models["long"] 
+                if self.ha_trend[pair] == 1 
+                else pair not in self.models["short"]):
+            return
         else:
-            interval = dataframe.iloc[-1]["interval"]
-            candle_age = ((dataframe.iloc[-1]["close_time"] / 1e6)
-                          - datetime.now(tz=timezone.utc).timestamp())
+            interval = clean_df.iloc[-1]["interval"]
+            candle_age = (self.interval_s[interval] 
+                          - ((dataframe.iloc[-1]["close_time"] / 1e3) 
+                             - datetime.now(tz=timezone.utc).timestamp()))
 
             if (self.ha_trend[pair] == 1
                     and self.prev_ha_trend[pair] == -1
-                    and candle_age > self.interval_s[interval] / 2
-                    and pair in self.pairs["long"]):
-                prediction, ttp, _spread, _n_tick, _direction = self.layer2(
+                    and candle_age < self.interval_s[interval] / 5 
+                    and self.ha_candle[pair] == 1 
+                    and last_price > open_price 
+                    and last_price < 1.002 * open_price):
+                prediction = self.layer2(
                     base=base, quote=quote,
-                    data=clean_df.to_dict('list'),
+                    data=clean_df[:-1],
                     mode=self.mode,
                     ha_trend=self.ha_trend[pair])
+                logging.info(f"Predicting long position {pair}. Result: {prediction}")
 
                 self.save_metrics(start, f"{base}{quote}")
                 signal = True if prediction else False
 
             elif (self.ha_trend[pair] == -1
                   and self.prev_ha_trend[pair] == 1
-                  and candle_age > self.interval_s[interval] / 2
-                  and pair in self.pairs["short"]):
+                  and candle_age < self.interval_s[interval] / 5 
+                  and self.ha_candle[pair] == -1 
+                  and last_price < open_price 
+                  and last_price > 0.998 * open_price):
                 prediction = self.layer2(
                     base=base, quote=quote,
-                    data=clean_df.to_dict('list'),
+                    data=clean_df[:-1],
                     mode=self.mode,
                     ha_trend=self.ha_trend[pair])
+                logging.info(f"Predicting short position {pair}. Result: {prediction}")
 
                 self.save_metrics(start, f"{base}{quote}")
                 signal = True if prediction else False
-
-            # update the previous heikin ashi trend, so that we can use it for
-            # the next klines data
-            self.prev_ha_trend.update(self.ha_trend)
-
+        
         return Signal(
             base=base,
             quote=quote,
@@ -753,7 +790,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             callback=callback,
             n_tick_forward=_n_tick,
             expiration_minutes=self.expiration_minutes
-        ) if signal else None
+            ) if signal else None
 
     def layer2(self,
                base: str,
@@ -769,6 +806,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             base: `str`
             quote: `str`
             data: `list`
+                klines data
             mode: `str`
                 dev or prod
             ha_trend: `int`
@@ -789,69 +827,32 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
         adx_ = AverageDirectionalIndex()
         dm_ = DirectionalMovement()
         bollingermidband_ = BollingerMidBand()
-
+        
         # combine the features
-        features = [ema_slope_.preprocess(data),
-                    ema_relationship_.preprocess(data),
-                    rvol_.preprocess(data),
-                    vwap_.preprocess(data),
-                    cci_.preprocess(data),
-                    adx_.preprocess(data),
-                    dm_.preprocess(data),
-                    bollingermidband_.preprocess(data)]
-        aggregated_data = self.aggregate_features(data, features)
-
-        # removed non-numerical columns
-        float_cols = list(aggregated_data.columns[
-                              aggregated_data.dtypes == "float64"])
-        aggregated_data = aggregated_data[float_cols]
-        close_series = aggregated_data.close
-
-        if self.is_stationary(close_series):
-            model_input = aggregated_data[-200:].values
-
-        else:
-            d = brentq(f=self.find_d_rolling, a=0, b=1, args=(close_series, ),
-                       full_output=False)
-            frac_df = self.fraction_differencing(data, columns=float_cols, d=d)
-            model_input = frac_df[:-200].values
-
+        features = [ema_slope_, ema_relationship_,
+                    rvol_, vwap_, cci_,
+                    adx_, dm_, bollingermidband_]
+        features = [pd.DataFrame({feature.feature_name: feature.preprocess(data)}) 
+                    for feature in features]
+        aggregated_features = pd.concat(features, axis=1)
+        aggregated_features.index = data.index
+        feature_cols = list(aggregated_features.columns)
+        aggregated_data = pd.concat([data, aggregated_features], axis=1)
+        aggregated_data.dropna(axis=0, inplace=True)
+        ohlcv_cols = ["open", "high", "low", "close", "volume"]
+        aggregated_data = aggregated_data[ohlcv_cols+feature_cols]
+        
+        for column in list(aggregated_data.columns):
+            series = aggregated_data[column]
+            if not self.is_stationary(series):
+                d = brentq(f=self.find_d_rolling, a=0, b=1, args=(series, ))
+                frac_series = fracdiff(series.values, order=d, tau=1e-2)
+                aggregated_data[column] = frac_series
+        model_input = aggregated_data[-225:].values.reshape(1, -1)
         direction = "long" if ha_trend == 1 else "short"
         prediction = self.models[direction][f"{base}{quote}"].predict(
-            model_input)
-
-        return prediction
-
-    def fraction_differencing(self, data: pd.DataFrame,
-                              columns: list, d: float):
-        """ This function performs fractional differencing on the input data
-
-            Parameters
-            ----------
-            data: `pd.DataFrame`
-                full time-series data to fractionally differentiate
-            columns: `list`
-                the columns to fractionally differentiate
-            d: `float`
-                fractional difference order
-
-            Returns
-            -------
-            `pd.DataFrame`
-
-        """
-        for col in columns:
-            if col == "close":
-                continue
-            series = data[col]
-            if not self.is_stationary(series):
-                frac_series = fracdiff(series.values, order=d, tau=1e-2)
-                data[col] = frac_series
-            else:
-                continue
-        # drop na
-        data.dropna(axis=0, inplace=True)
-        return data
+            model_input)[0]
+        return True if int(prediction) == 1 else 0
 
     def find_d_rolling(self, d, series: pd.Series) -> float:
         """
@@ -895,31 +896,6 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
         adf = adfuller(series, maxlag=1, autolag=None)
         p_val = adf[1]
         return p_val <= significance
-
-    def aggregate_features(self, data: pd.DataFrame, features: list):
-        """ Combines additional features to the original dataframe
-
-            Parameters
-            ----------
-            data: `pd.DataFrame`
-                kline dataframe
-            features: `list`
-                list of technical analysis features
-
-            Returns
-            -------
-            `pd.DataFrame`
-                Aggregated Features
-
-        """
-        df = data.copy()
-        for feature in features:
-            df_feature = pd.DataFrame(feature)
-            df = pd.concat([df, df_feature], axis=1)
-
-        # drop na
-        df.dropna(axis=0, inplace=True)
-        return df
 
 
 class HeikinAshiRegression(HeikinAshiBase):
