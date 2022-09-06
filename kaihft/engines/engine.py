@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import logging, json, asyncio, time, os
+import math
 from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 from google.cloud import pubsub_v1
@@ -10,6 +11,8 @@ from kaihft.publishers.client import KaiPublisherClient
 from kaihft.subscribers.client import KaiSubscriberClient
 from .strategy import StrategyType, get_strategy, Strategy
 from .signal import SignalStatus, init_signal_from_rtd, Signal
+import traceback
+import statistics
 
 
 class SignalEngine():
@@ -144,8 +147,8 @@ class SignalEngine():
             ha_callback = self.strategy.calculate_heikin_ashi_trend
             await asyncio.gather(
                 self.subscribe('ticker', self.update_signals),
-                self.subscribe('klines', self.scout_signals),
                 self.subscribe('ha_klines', ha_callback),
+                self.subscribe('klines', self.scout_signals),
                 self.listen_thresholds(self._update_thresholds),
                 self.listen_pairs(self._update_pairs),
                 self.listen_buffers(self._update_buffers)
@@ -298,8 +301,8 @@ class SignalEngine():
             return
         # update the strategy's with new pairs
         logging.info(f"[listen] retrieving-new-pairs from signal database.")
-        pairs['long'] = [pair.upper() for pair in pairs['long']]
-        pairs['short'] = [pair.upper() for pair in pairs['short']]
+        pairs['long'] = [pair.upper() for pair in pairs['long'] if pair]
+        pairs['short'] = [pair.upper() for pair in pairs['short'] if pair]
         self.pairs.update(pairs)
         # update the strategy pairs changes
         self.strategy.pairs = pairs
@@ -380,6 +383,7 @@ class SignalEngine():
         # purging the subscription if needed
         sub_id = self.subscriptions_params[subscription]['id']
         topic_id = sub_id.rsplit("-", 1)[0]
+        sub_id = f"{topic_id}-{self.strategy.name}-{subscription}-sub"
         _subscriber = KaiSubscriberClient()
         subscription_path = _subscriber.client.subscription_path(
             _subscriber.project_id, sub_id)
@@ -427,8 +431,8 @@ class SignalEngine():
                      f"subscription entity: {subscription} ...")
         time.sleep(30)
         self.subscribers[subscription].subscribe(
-            subscription_id=self.subscriptions_params[subscription]['id'],
-            timeout=self.subscriptions_params[subscription]['timeout'],
+            subscription_id=sub_id,
+            timeout=None,
             callback=callback,
             single_stream=single_stream)
             
@@ -444,9 +448,7 @@ class SignalEngine():
         if message.attributes and 'timestamp' in message.attributes:
             # get the attributes of the message
             symbol = message.attributes.get("symbol")
-            timestamp = int(message.attributes.get("timestamp"))
-            ticker_time = datetime.utcfromtimestamp(timestamp / 1000)
-            seconds_passed = (datetime.utcnow() - ticker_time).total_seconds()
+            seconds_passed = (datetime.now(tz=timezone.utc) - message.publish_time).total_seconds()
 
             # only accept data below 3 seconds latency
             if seconds_passed <= 3 and seconds_passed >= 0:
@@ -492,12 +494,9 @@ class SignalEngine():
         if message.attributes and 'timestamp' in message.attributes and self.is_ready:
             # get the attributes of the message
             symbol = message.attributes.get("symbol")
-            timestamp = int(message.attributes.get("timestamp"))
-            klines_time = datetime.utcfromtimestamp(timestamp / 1000)
-            seconds_passed = (datetime.utcnow() - klines_time).total_seconds()
-
+            seconds_passed = (datetime.now(tz=timezone.utc) - message.publish_time).total_seconds()
             # only accept messages within 1.5 seconds latency
-            if seconds_passed <= 1.5 and seconds_passed >= 0:
+            if seconds_passed <= 10 and seconds_passed >= 0:
                 # get the symbol of the klines
                 base = message.attributes.get('base')
                 quote = message.attributes.get('quote')
@@ -574,7 +573,7 @@ class SignalEngine():
                     quote=quote,
                     dataframe=dataframe, 
                     callback=self.close_signal)
-
+                
                 # if signal is triggered
                 if signal: 
                     # save the signal to class attrs
@@ -588,7 +587,8 @@ class SignalEngine():
         except Exception as e:
             logging.error(f"[strategy] Exception caught running-strategy, "
                           f"symbol:-{symbol}. Unable to connect to firebase "
-                          f"rtd pod need to restart, error: {e}")
+                          f"rtd pod need to restart, error: {e}", 
+                          f"traceback: {traceback.format_exc()}")
             if os.path.exists('tmp/healthy'): os.remove('tmp/healthy')
         finally:
             # ensure that the symbol is removed
@@ -704,10 +704,13 @@ class SignalEngine():
             f"topic:{self.archive_topic_path}, symbol: {signal.symbol}")
         # publish the newly created signal
         # to dedicated archiving topic
+        average_tp = statistics.mean(signal.take_profit)
+        signal_to_publish = signal.to_dict().copy()
+        signal_to_publish.update({"take_profit": average_tp})
         self.publisher.publish(
             origin=self.__class__.__name__,
             topic_path=self.archive_topic_path,
-            data=signal.to_dict(),
+            data=signal_to_publish,
             attributes=dict(
                 symbol=signal.symbol,
                 base=signal.base,
@@ -727,10 +730,13 @@ class SignalEngine():
             f"topic:{self.dist_topic_path}, symbol: {signal.symbol}")
         # publish the newly created signal
         # to dedicated distributed topic
+        average_tp = statistics.mean(signal.take_profit)
+        signal_to_publish = signal.to_dict().copy()
+        signal_to_publish.update({"take_profit": average_tp})
         self.publisher.publish(
             origin=self.__class__.__name__,
             topic_path=self.dist_topic_path,
-            data=signal.to_dict(),
+            data=signal_to_publish,
             attributes=dict(
                 symbol=signal.symbol,
                 base=signal.base,
@@ -917,8 +923,8 @@ class SignalEngine():
             raise ValueError(f"Pairs `long` and `short` must be a list, instead got: {pairs}")
         logging.info(f"[get] retrieved-pairs: {pairs} from database")
         # ensure that all pairs uppercase
-        long = [pair.upper() for pair in pairs['long']]
-        short = [pair.upper() for pair in pairs['short']]
+        long = [pair.upper() for pair in pairs['long'] if pair]
+        short = [pair.upper() for pair in pairs['short'] if pair]
         return dict(long=long, short=short)
         
     def _get_strategy(self,
@@ -1004,6 +1010,22 @@ class SignalEngine():
                 expiration_minutes=strategy_params.get("expiration_minutes", None)
             )
         elif self.strategy_type == StrategyType.HEIKIN_ASHI_REGRESSION:
+            return strategy_class(
+                mode=strategy_params['mode'],
+                kaiforecast_version=strategy_params.get("kaiforecast_version", None),
+                long_spread=thresholds['long']['bet_threshold'],
+                short_spread=thresholds['short']['bet_threshold'],
+                long_ttp=thresholds['long']['ttp_threshold'],
+                short_ttp=thresholds['short']['ttp_threshold'],
+                pairs=self.pairs,
+                ha_timeframe=strategy_params['ha_timeframe'],
+                model_timeframe=strategy_params['timeframe'],
+                ha_ema_len=strategy_params['ha_ema_len'],
+                log_every=self.log_metrics_every,
+                endpoint=self.endpoint,
+                expiration_minutes=strategy_params.get("expiration_minutes", None)
+            )
+        elif self.strategy_type == StrategyType.HEIKIN_ASHI_FRAC_DIFF:
             return strategy_class(
                 mode=strategy_params['mode'],
                 kaiforecast_version=strategy_params.get("kaiforecast_version", None),

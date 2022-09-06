@@ -55,8 +55,12 @@ def main(exchange: str,
     elif exp0a: path='exp0a'; endpoint=f"EXP0A_predict_{strategy_params['timeframe']}"; mode="experiment-0a"
     elif exp1a: path='exp1a'; endpoint=f"EXP1A_predict_{strategy_params['timeframe']}"; mode="experiment-1a"
     else: path='dev'; endpoint=f"dev_predict_{strategy_params['timeframe']}"; mode="development"
-    ticker_topic_path = f'{path}-ticker-{exchange}-{version}-sub'
+        
+    # exp0a and exp1a will use dev for ticker and klines
+    ticker_kline_path = "dev" if path != "prod" else "prod"
+    ticker_topic_path = f'{ticker_kline_path}-ticker-{exchange}-{version}-sub'
     klines_topic_path = f'{path}-klines-{exchange}-{version}-{strategy_params["timeframe"]}-sub'
+    # use binance as signal exchange, even if the exchange is binanceusdm
     dist_topic_path = f'{path}-distribute-signal-{exchange}-{version}'
     archive_topic_path = f'{path}-signal-{exchange}-{version}'
     database_ref = f"{path}/signals"

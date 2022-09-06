@@ -726,6 +726,7 @@ class BinanceSpotKlinesPublisher(BaseTickerKlinesPublisher):
                 # update the dataframe appropriately
                 klines = self.update_klines(symbol, data)
                 base, quote = self.get_base_quote(symbol)
+                stream_time = stream['data']["E"]
 
                 self.publisher.publish(
                     origin=self.__class__.__name__,
@@ -734,7 +735,8 @@ class BinanceSpotKlinesPublisher(BaseTickerKlinesPublisher):
                     attributes=dict(
                         base=base,
                         quote=quote,
-                        symbol=symbol))
+                        symbol=symbol, 
+                        timestamp=str(stream_time)))
 
             count += 1
             if count % self.log_every == 0:

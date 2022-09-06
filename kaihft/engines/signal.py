@@ -1,9 +1,10 @@
 import uuid, logging
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Optional, Union
+from typing import Optional, Union, List
 
-from numpy.core.fromnumeric import take
+import numpy as np
+
 
 class SignalStatus(Enum):
     NEW = "NEW"
@@ -29,7 +30,7 @@ class Signal():
     def __init__(self,
                  base: str,
                  quote: str,
-                 take_profit: float,
+                 take_profit: float or List[float],
                  spread: float,
                  purchase_price: float,
                  last_price: float,
@@ -37,7 +38,8 @@ class Signal():
                  callback: callable,
                  n_tick_forward: int,
                  buffer: int = 24,
-                 realized_profit : float = 0.0,
+                 realized_profit: float = 0.0,
+                 checkpoint_trailing_thresh: float = 0.4,
                  id: str = None,
                  created_at: int = None,
                  expired_at: int = None,
@@ -91,8 +93,22 @@ class Signal():
         self.take_profit = take_profit
         self.spread = spread
         self.purchase_price = purchase_price
-        tp = (1 + (take_profit / 100)) if direction == 1 else (1 - (take_profit / 100))
-        self.exit_price = purchase_price * tp
+
+        # specify exit price for regular take profit and checkpoint take profit
+        if type(self.take_profit) == float:
+            tp = (1 + (take_profit / 100)) if direction == 1 \
+                else (1 - (take_profit / 100))
+            self.exit_price = purchase_price * tp
+        elif type(self.take_profit) == list:
+            self.current_checkpoint = 0
+            tp = (1 + (self.take_profit[0] / 100)) if direction == 1 \
+                else (1 - (self.take_profit[0] / 100))
+            self.exit_price = purchase_price * tp
+        # if take profit is None, it means we rely on the heikin ashi
+        # direction change to stop the position
+        elif self.take_profit is None:
+            self.exit_price = np.inf if direction == 1 else -np.inf
+
         self.last_price = last_price
         self.direction = direction
         self.n_tick_forward = n_tick_forward
@@ -100,6 +116,8 @@ class Signal():
         self._status = status
         self.buffer = buffer
         self.realized_profit = realized_profit
+        self.checkpoint_trailing_thresh = checkpoint_trailing_thresh
+
         if expiration_minutes is None:
             expiration_minutes = (45 * (n_tick_forward + buffer))
         if stop_loss is None:
@@ -114,7 +132,8 @@ class Signal():
             if not expired_at else expired_at)
         add_log = f", stop loss: {stop_loss}" if stop_loss else ""
         logging.info(f"[signal] created! symbol:{self.symbol}, "
-            f"spread: {self.spread}, ttp: {self.take_profit}, direction: {self.direction}{add_log}")
+                     f"spread: {self.spread}, ttp: {self.take_profit}, "
+                     f"direction: {self.direction}{add_log}")
         self.open()
     
     @property
@@ -179,15 +198,30 @@ class Signal():
         if (self.direction == 1 and last_price >= self.exit_price) or \
                 (self.direction == 0 and last_price <= self.exit_price):
             self.update_realized_profit(status=SignalStatus.COMPLETED)
-            logging.info(f"[completed] signal - symbol: {self.symbol}, "
-                f"direction: {self.direction}, realized-profit: {self.realized_profit}%")
-            self.callback(self)
+            if type(self.take_profit) != list:
+                print(f"Take profit type: {type(self.take_profit)}")
+                logging.info(f"[completed] signal - symbol: {self.symbol}, "
+                             f"direction: {self.direction}, "
+                             f"realized-profit: {self.realized_profit}%")
+                self.callback(self)
+            elif (type(self.take_profit) == list
+                  and self.current_checkpoint == len(self.take_profit)):
+                logging.info(f"[completed] signal - symbol: {self.symbol}, "
+                             f"direction: {self.direction}, "
+                             f"realized-profit: {self.realized_profit}%")
+                self.callback(self)
+            else:
+                logging.info(f"[checkpoint-exit {self.current_checkpoint}] signal - symbol: {self.symbol}, "
+                             f"direction: {self.direction}, "
+                             f"realized-profit: {self.realized_profit}%")
+                self.open()
         # check if time has surpassed expected expired date
         elif datetime.utcnow().timestamp() >= self.expired_at:
             self.update_realized_profit(status=SignalStatus.EXPIRED)
             logging.info(f"[expired] signal - symbol: {self.symbol}, "
-                f"direction: {self.direction}, expiration: {self.expired_at}, "
-                f"realized-spread: {self.realized_profit}%")
+                         f"direction: {self.direction}, "
+                         f"expiration: {self.expired_at}, "
+                         f"realized-spread: {self.realized_profit}%")
             self.callback(self)
         # if last price have gone below the stop price (LONG position stop loss)
         elif self.stop_price is not None and (
@@ -195,12 +229,18 @@ class Signal():
                 (self.direction == 0 and last_price >= self.stop_price)):
             self.update_realized_profit(status=SignalStatus.STOPPED)
             logging.info(f"[stopped] signal - symbol: {self.symbol}, "
-                f"direction: {self.direction}, loss: {self.realized_profit}%")
+                         f"direction: {self.direction}, "
+                         f"loss: {self.realized_profit}%")
             self.callback(self)
         # signal is updated and back to open
-        else: self.open()
+        else: 
+            if (type(self.take_profit) == list 
+                    and self.stop_price 
+                    and last_price > self.stop_price + (self.checkpoint_trailing_thresh * self.purchase_price / 100)):
+                self.stop_price = last_price - (self.checkpoint_trailing_thresh * self.purchase_price / 100)
+            self.open()
         return self._status
-
+            
     def update_realized_profit(self, status: SignalStatus):
         """ Calculate the realized profit of a closed signal.
 
@@ -209,10 +249,45 @@ class Signal():
             status: `SignalStatus`
                 The updated status of the signal.
         """
-        multiplier = 1 if self.direction == 1 else -1
-        spread = (self.last_price - self.purchase_price) / self.purchase_price * 100 * multiplier
-        self.realized_profit = round(spread, 4)
-        self._status = status
+        if type(self.take_profit) != list:
+            multiplier = 1 if self.direction == 1 else -1
+            spread = ((self.last_price - self.purchase_price)
+                      / self.purchase_price * 100 * multiplier)
+            self.realized_profit = round(spread, 4)
+            self._status = status
+
+        elif type(self.take_profit) == list:
+            if status == SignalStatus.COMPLETED:
+                multiplier = 1 if self.direction == 1 else -1
+                spread = ((self.last_price - self.purchase_price)
+                          / self.purchase_price * 100 * multiplier)
+                self.realized_profit += round(spread, 4) / len(self.take_profit)
+                self.current_checkpoint += 1
+
+                if self.current_checkpoint == len(self.take_profit):
+                    self._status = status
+
+                else:
+                    tp = (1 + (self.take_profit[self.current_checkpoint] / 100)) \
+                        if self.direction == 1 \
+                        else (1 - (self.take_profit[self.current_checkpoint] / 100))
+                    self.exit_price = self.purchase_price * tp
+                    # add stop loss when the last price hits the original price
+                    if self.stop_price is None:
+                        self.stop_price = (self.purchase_price * 1.001 if self.direction == 1 
+                                           else self.purchase_price * 0.999)
+
+            elif (status == SignalStatus.EXPIRED
+                  or status == SignalStatus.STOPPED):
+                multiplier = 1 if self.direction == 1 else -1
+                spread = ((self.last_price - self.purchase_price)
+                          / self.purchase_price * 100 * multiplier)
+                remaining_checkpoint = (len(self.take_profit)
+                                        - self.current_checkpoint)
+                self.realized_profit += ((round(spread, 4)
+                                          * remaining_checkpoint
+                                          / len(self.take_profit)))
+                self._status = status
 
     def to_dict(self) -> dict:
         """ Returns
