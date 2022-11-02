@@ -16,3 +16,9 @@ __pycache__/
 tmp
 *.pyc
 *.json
+signal_service/*
+models/*
+*.ipynb_checkpoints
+*.ipynb
+*whl
+*.yaml

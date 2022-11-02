@@ -145,9 +145,11 @@ class SignalEngine():
         """
         if "ha_klines" in self.subscribers:
             ha_callback = self.strategy.calculate_heikin_ashi_trend
+#             higher_ha_callback = self.strategy.calculate_higher_heikin_ashi_trend
             await asyncio.gather(
                 self.subscribe('ticker', self.update_signals),
                 self.subscribe('ha_klines', ha_callback),
+#                 self.subscribe('higher_ha_klines', higher_ha_callback),
                 self.subscribe('klines', self.scout_signals),
                 self.listen_thresholds(self._update_thresholds),
                 self.listen_pairs(self._update_pairs),
@@ -381,9 +383,10 @@ class SignalEngine():
                 True if the whole engine is meant to subscribe in singular topic only.
         """
         # purging the subscription if needed
+        mode = self.strategy_params["mode"]
         sub_id = self.subscriptions_params[subscription]['id']
         topic_id = sub_id.rsplit("-", 1)[0]
-        sub_id = f"{topic_id}-{self.strategy.name}-{subscription}-sub"
+        sub_id = f"{topic_id}-{self.strategy.name}-{subscription}-{mode}-sub"
         _subscriber = KaiSubscriberClient()
         subscription_path = _subscriber.client.subscription_path(
             _subscriber.project_id, sub_id)
@@ -670,6 +673,10 @@ class SignalEngine():
             # update cooldown if signal completed
             if signal.status in [SignalStatus.COMPLETED, SignalStatus.STOPPED]:
                 self.update_cooldown(signal.symbol)
+                
+            if "HEIKIN_ASHI" in self.strategy.name:
+                self.strategy.last_signal[signal.symbol] = datetime.now(tz=timezone.utc).timestamp() 
+            
     
     def update_cooldown(self, symbol: str):
         """ Will update the cooldown counter and time of a symbol.
@@ -1039,6 +1046,7 @@ class SignalEngine():
                 ha_ema_len=strategy_params['ha_ema_len'],
                 log_every=self.log_metrics_every,
                 endpoint=self.endpoint,
+                features=strategy_params["features"],
                 expiration_minutes=strategy_params.get("expiration_minutes", None)
             )
         else:

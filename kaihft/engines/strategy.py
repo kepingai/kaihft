@@ -18,7 +18,11 @@ from kaiforecast.preprocessing import (EMASlope, EMARelationship,
                                        RVOL, VWAP, CCI,
                                        BollingerMidBand,
                                        AverageDirectionalIndex,
-                                       DirectionalMovement)
+                                       DirectionalMovement, 
+                                       OnBalanceVolume, 
+                                       UlcerIndex, 
+                                       MACD, 
+                                       RSI, ATR)
 from statsmodels.tsa.stattools import adfuller
 from numpy_fracdiff import fracdiff
 from scipy.optimize import brentq
@@ -324,15 +328,18 @@ class HeikinAshiBase(Strategy):
                      f"EMA length: {ha_ema_len}.")
         # initialize the heikin-ashi trend dict
         self.ha_klines_counts = 1
-        self.ha_trend, self.ha_candle, self.ha_cooldowns, self.previous_ha_trend = {}, {}, {}, {}
-        traded_pairs = set(list(pairs["long"])+list(pairs["short"]))
-        self.ha_trend = {symbol: 0 for symbol in traded_pairs}
-        self.prev_ha_trend = {symbol: 0 for symbol in traded_pairs}
+        self.higher_ha_klines_counts = 1
+        self.ha_trend, self.prev_ha_trend, self.higher_ha_trend, self.ha_cooldowns = {}, {}, {}, {}
+        self.ha_candle, self.higher_ha_candle = {}, {}
+        self.ha_type, self.prev_ha_type = {}, {}
+        self.higher_ha_type, self.prev_higher_ha_type = {}, {}
         self.ha_cooldown = 100  # second(s)
         for _, v in pairs.items():
             for p in v:
-                if p not in self.ha_trend: self.ha_trend[p] = 0
-                if p not in self.ha_candle: self.ha_candle[p] = 0
+                if p not in self.ha_trend: self.ha_trend.update({p: 0})
+                if p not in self.ha_candle: self.ha_candle.update({p: 0})
+                if p not in self.higher_ha_trend: self.higher_ha_trend.update({p: 0})
+                if p not in self.prev_ha_trend: self.prev_ha_trend.update({p: 0})   
         logging.info(f"[strategy] [{str(strategy)}] initialized the heikin-"
                      f"ashi trend and candle, ha_trend: {self.ha_trend}, "
                      f"ha_candle: {self.ha_candle}")
@@ -438,9 +445,9 @@ class HeikinAshiBase(Strategy):
                ha_trend: int):
         """ Connect to layer 2 and inference to specific model. """
         raise NotImplementedError()
-
-    def calculate_heikin_ashi_trend(self,
-                                    message: pubsub_v1.subscriber.message.Message):
+        
+    def calculate_higher_heikin_ashi_trend(self,
+                                           message: pubsub_v1.subscriber.message.Message):
         """ This function calculates the buy and sell signals based on Coinsspor Heikin Ashi Tradingview signals.
 
             Parameters
@@ -475,24 +482,24 @@ class HeikinAshiBase(Strategy):
                              'close']) / 4
 
                 # calculate the heiken ashi candles and rename the columns so that we can calculate the EMA
-                heikin_ashi_klines = ha_dataframe.ta.ha()
-                heikin_ashi_klines = heikin_ashi_klines.rename(
+                ha_klines = ha_dataframe.ta.ha()
+                ha_klines = ha_klines.rename(
                     columns={'HA_open': 'open', 'HA_high': 'high',
                              'HA_low': 'low', 'HA_close': 'close'})
 
                 # get the latest heikin-ashi candle of the specific symbol
-                ha_candles = heikin_ashi_klines["close"] - heikin_ashi_klines[
+                ha_candles = ha_klines["close"] - ha_klines[
                     "open"]
-                self.ha_candle[symbol] = 1 if ha_candles.iloc[-1] > 0 else -1
+                self.higher_ha_candle[symbol] = 1 if ha_candles.iloc[-1] > 0 else -1
 
                 # start calculation. See tradingview for reference
-                hac = pd.DataFrame((ohlc4 + heikin_ashi_klines['open'].fillna(0)
+                hac = pd.DataFrame((ohlc4 + ha_klines['open'].fillna(0)
                                     + pd.concat([ha_dataframe['high'],
-                                                 heikin_ashi_klines[
+                                                 ha_klines[
                                                      'open'].fillna(0)]).max(
                             level=0)
                                     + pd.concat([ha_dataframe['low'],
-                                                 heikin_ashi_klines[
+                                                 ha_klines[
                                                      'open'].fillna(0)]).min(
                             level=0)) / 4,
                                    columns=['close'])
@@ -547,18 +554,200 @@ class HeikinAshiBase(Strategy):
                 downtrend = np.array(np.array(kirmizi) > np.array(mavi))
                 
                 if np.all(uptrend[-2:]):
-                    self.ha_trend.update({symbol: 1})
+                    self.higher_ha_trend.update({symbol: 1})
                 elif np.all(downtrend[-2:]):     
+                    self.higher_ha_trend.update({symbol: -1})
+                else:
+                    self.higher_ha_trend.update({symbol: 0})
+                    
+                # classify heikin ashi candle type
+                ha_klines.loc[ha_klines["close"] >= ha_klines["open"], "color"] = "green"
+                ha_klines.loc[ha_klines["close"] < ha_klines["open"], "color"] = "red"
+                ha_klines.loc[(ha_klines["color"]=="green")
+                              & (ha_klines["high"]-ha_klines["close"] 
+                                 > 1.5*(ha_klines["open"]-ha_klines["low"])), 
+                              "candle_type"] = "bullish"
+                ha_klines.loc[(ha_klines["color"]=="green") 
+                              & (ha_klines["high"]-ha_klines["close"] 
+                                 < 1.5*(ha_klines["open"]-ha_klines["low"])), 
+                              "candle_type"] = "undecided"
+                ha_klines.loc[(ha_klines["color"]=="red") 
+                              & (ha_klines["close"]-ha_klines["low"] 
+                                 > 1.5*(ha_klines["high"]-ha_klines["open"])), 
+                              "candle_type"] = "bearish"
+                ha_klines.loc[(ha_klines["color"]=="red") 
+                              & (ha_klines["close"]-ha_klines["low"] 
+                                 < 1.5*(ha_klines["high"]-ha_klines["open"])), 
+                              "candle_type"] = "undecided"
+                
+                self.higher_ha_type.update({symbol: ha_klines["candle_type"].iloc[-1]})
+                self.prev_higher_ha_type.update({symbol: ha_klines["candle_type"].iloc[-2]})
+
+            # restarting the pod if latency above 10 minute(s),
+            # as the safety net to handle message flooding.
+            if seconds_passed > 600:
+                logging.critical(f"[restart] restarting the signal engine due "
+                                 f"to excessive heikin-ashi klines message "
+                                 f"latency: {seconds_passed} seconds.")
+                if os.path.exists('tmp/healthy'): os.remove('tmp/healthy')
+            # logging the ha klines counter
+            if self.higher_ha_klines_counts % (self.log_every * 10) == 0:
+                logging.info(f"[higher_ha_klines] cloud pub/sub messages running, "
+                             f"latency: {seconds_passed} sec, last-symbol: "
+                             f"{symbol}, "
+                             f"higher_ha_trend: {self.higher_ha_trend}" 
+                             f"higher_candle_type: {self.higher_ha_type} " 
+                             f"previous higher_candle_type: {self.prev_higher_ha_type}")
+                # reset the signal counts to 1
+                self.higher_ha_klines_counts = 1
+            # add the counter for each message received
+            self.higher_ha_klines_counts += 1
+        # acknowledge the message
+        message.ack()
+
+    def calculate_heikin_ashi_trend(self,
+                                    message: pubsub_v1.subscriber.message.Message):
+        """ This function calculates the buy and sell signals based on Coinsspor Heikin Ashi Tradingview signals.
+
+            Parameters
+            ----------
+            message: `pubsub_v1.subscriber.message.Message`
+                message containing the klines which will be analysed using Heikin-Ashi
+
+        """
+        if message.attributes and 'timestamp' in message.attributes:
+            # get the attributes of the message
+            symbol = message.attributes.get("symbol")
+            timestamp = int(message.attributes.get("timestamp"))
+            klines_time = datetime.utcfromtimestamp(timestamp / 1000)
+            seconds_passed = (datetime.utcnow() - klines_time).total_seconds()
+            # only accept messages within 150 seconds latency
+            if 150 >= seconds_passed >= 0 and self.is_valid_cooldown(symbol):
+                # get the symbol of the klines
+                base = message.attributes.get('base')
+                quote = message.attributes.get('quote')
+                # only run strategy if symbol is currently
+                # not an ongoing signal and also not currently
+                # awaiting for a result from running strategy
+
+                # run a separate thread to run startegy
+                klines = pd.DataFrame(
+                    json.loads(message.data.decode('utf-8'))['data'])
+                ha_dataframe = self.format_dataframe(klines)
+
+                # ohlc4 is a tradingview variable. It is the average of the OHLC value
+                ohlc4 = (ha_dataframe['open'] + ha_dataframe['high'] +
+                         ha_dataframe['low'] + ha_dataframe[
+                             'close']) / 4
+
+                # calculate the heiken ashi candles and rename the columns so that we can calculate the EMA
+                ha_klines = ha_dataframe.ta.ha()
+                ha_klines = ha_klines.rename(
+                    columns={'HA_open': 'open', 'HA_high': 'high',
+                             'HA_low': 'low', 'HA_close': 'close'})
+
+                # get the latest heikin-ashi candle of the specific symbol
+                ha_candles = ha_klines["close"] - ha_klines[
+                    "open"]
+                self.ha_candle[symbol] = 1 if ha_candles.iloc[-1] > 0 else -1
+
+                # start calculation. See tradingview for reference
+                hac = pd.DataFrame((ohlc4 + ha_klines['open'].fillna(0)
+                                    + pd.concat([ha_dataframe['high'],
+                                                 ha_klines[
+                                                     'open'].fillna(0)]).max(
+                            level=0)
+                                    + pd.concat([ha_dataframe['low'],
+                                                 ha_klines[
+                                                     'open'].fillna(0)]).min(
+                            level=0)) / 4,
+                                   columns=['close'])
+                ema1 = pd.DataFrame(hac.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                ema2 = pd.DataFrame(ema1.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                ema3 = pd.DataFrame(ema2.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                tma1 = 3 * ema1 - 3 * ema2 + ema3
+                ema4 = pd.DataFrame(tma1.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                ema5 = pd.DataFrame(ema4.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                ema6 = pd.DataFrame(ema5.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                tma2 = 3 * ema4 - 3 * ema5 + ema6
+                ipek = tma1 - tma2
+                yasin = tma1 + ipek
+                hlc3 = pd.DataFrame((ha_dataframe['high'] + ha_dataframe[
+                    'low'] + ha_dataframe['close']) / 3,
+                                    columns=['close'])
+                ema7 = pd.DataFrame(hlc3.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                ema8 = pd.DataFrame(ema7.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                ema9 = pd.DataFrame(ema8.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                tma3 = 3 * ema7 - 3 * ema8 + ema9
+                ema10 = pd.DataFrame(
+                    tma3.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                ema11 = pd.DataFrame(
+                    ema10.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                ema12 = pd.DataFrame(
+                    ema11.ta.ema(length=self.ha_ema_len)).rename(
+                    columns={f'EMA_{self.ha_ema_len}': 'close'})
+                tma4 = 3 * ema10 - 3 * ema11 + ema12
+
+                # These are some turkish words. mavi means blue and kirmizi means red.
+                # if mavi > kirmizi, we are in an uptrend and vice versa.
+                # No idea what ipek and yasin mean. I just followed the vocab he used in tradingview.
+                ipek1 = tma3 - tma4
+                yasin1 = tma3 + ipek1
+                mavi = yasin1.fillna(0)
+                kirmizi = yasin.fillna(0)
+
+                # define trend for long and short positions
+                # if True, it means the model can go long. If False, the model can go short
+                uptrend = np.array(np.array(mavi) > np.array(kirmizi))
+                downtrend = np.array(np.array(kirmizi) > np.array(mavi))
+                
+                if np.all(uptrend[-3:-1]):
+                    self.ha_trend.update({symbol: 1})
+                elif np.all(downtrend[-3:-1]):     
                     self.ha_trend.update({symbol: -1})
                 else:
                     self.ha_trend.update({symbol: 0})
                 
-                if uptrend[-3]:
+                if uptrend[-4]:
                     self.prev_ha_trend.update({symbol: 1})
-                elif downtrend[-3]:
+                elif downtrend[-4]:
                     self.prev_ha_trend.update({symbol: -1})
                 else:
                     self.prev_ha_trend.update({symbol: 0})
+                         
+                # classify heikin ashi candle type
+                ha_klines.loc[ha_klines["close"] >= ha_klines["open"], "color"] = "green"
+                ha_klines.loc[ha_klines["close"] < ha_klines["open"], "color"] = "red"
+                ha_klines.loc[(ha_klines["color"]=="green")
+                              & (ha_klines["high"]-ha_klines["close"] 
+                                 > 1.5*(ha_klines["open"]-ha_klines["low"])), 
+                              "candle_type"] = "bullish"
+                ha_klines.loc[(ha_klines["color"]=="green") 
+                              & (ha_klines["high"]-ha_klines["close"] 
+                                 < 1.5*(ha_klines["open"]-ha_klines["low"])), 
+                              "candle_type"] = "undecided"
+                ha_klines.loc[(ha_klines["color"]=="red") 
+                              & (ha_klines["close"]-ha_klines["low"] 
+                                 > 1.5*(ha_klines["high"]-ha_klines["open"])), 
+                              "candle_type"] = "bearish"
+                ha_klines.loc[(ha_klines["color"]=="red") 
+                              & (ha_klines["close"]-ha_klines["low"] 
+                                 < 1.5*(ha_klines["high"]-ha_klines["open"])), 
+                              "candle_type"] = "undecided"
+                
+                self.ha_type.update({symbol: ha_klines["candle_type"].iloc[-1]})
+                self.prev_ha_type.update({symbol: ha_klines["candle_type"].iloc[-2]})
 
             # restarting the pod if latency above 10 minute(s),
             # as the safety net to handle message flooding.
@@ -573,7 +762,8 @@ class HeikinAshiBase(Strategy):
                              f"latency: {seconds_passed} sec, last-symbol: "
                              f"{symbol}, "
                              f"ha_trend: {self.ha_trend} " 
-                             f"previous_ha_trend: {self.prev_ha_trend}")
+                             f"previous_ha_trend: {self.prev_ha_trend} "
+                             f"previous candle_type: {self.prev_ha_type}")
                 # reset the signal counts to 1
                 self.ha_klines_counts = 1
             # add the counter for each message received
@@ -644,6 +834,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                  ha_timeframe: str,
                  model_timeframe: str,
                  ha_ema_len: int,
+                 features: list,
                  mode: str = "exp0a", 
                  kaiforecast_version: str = "", 
                  description: str = "Heikin-Ashi Buy and Sell Strategy by Coinsspor",
@@ -667,10 +858,12 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             model_timeframe=model_timeframe, 
             ha_ema_len=ha_ema_len
             )
-        self.prev_ha_trend = {}
+        
         self.interval_s = {"15m": 900,
                            "1h": 3600}
+        self.last_signal = {}
         self.models = self.load_models()
+        self.features = features
 
     def load_models(self) -> dict:
         """ Load the models for this strategy
@@ -685,11 +878,38 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
         models = {"long": {}, "short": {}}
         for direction in ["long", "short"]:
             for pair in self.pairs[direction]:
+                self.last_signal.update({pair: 0})
                 filename = f"models/RFClassifier_{pair.replace('USDT', '')}_{direction.upper()}.sav"
                 loaded_model = pickle.load(open(filename, 'rb'))
                 models[direction].update({pair: loaded_model})
         return models
-
+    
+    def get_features(self, feature_list: list):
+        """ Get the kaiforecast feature objects based on given features 
+            in environment variable file. 
+            
+            Parameters
+            ----------
+            feature_list: `list`
+                list of features
+        """
+        feature_templates = {"ema_slope": EMASlope(), 
+                             "ema_relationship": EMARelationship(), 
+                             "rvol": RVOL(), 
+                             "vwap": VWAP(), 
+                             "cci": CCI(), 
+                             "adx": AverageDirectionalIndex(), 
+                             "dm": DirectionalMovement(), 
+                             "bollingermidband": BollingerMidBand(), 
+                             "ui": UlcerIndex(), 
+                             "obv": OnBalanceVolume(), 
+                             "rsi": RSI(), 
+                             "macd": MACD(), 
+                             "atr": ATR()}
+        
+        return [feature_templates[feature] for feature in feature_list 
+                if feature in feature_templates.keys()]
+        
     def scout(self,
               base: str,
               quote: str,
@@ -746,10 +966,9 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
 
             if (self.ha_trend[pair] == 1
                     and self.prev_ha_trend[pair] == -1
-                    and candle_age < self.interval_s[interval] / 5 
-                    and self.ha_candle[pair] == 1 
-                    and last_price > open_price 
-                    and last_price < 1.002 * open_price):
+                    and candle_age < self.interval_s[interval] / 10 
+                    and datetime.now(tz=timezone.utc).timestamp() - self.last_signal[pair] > 1800 
+                    and self.ha_candle[pair] == 1):
                 prediction = self.layer2(
                     base=base, quote=quote,
                     data=clean_df[:-1],
@@ -758,14 +977,13 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                 logging.info(f"Predicting long position {pair}. Result: {prediction}")
 
                 self.save_metrics(start, f"{base}{quote}")
-                signal = True if prediction else False
+                signal = True if prediction is True else False  
 
             elif (self.ha_trend[pair] == -1
                   and self.prev_ha_trend[pair] == 1
-                  and candle_age < self.interval_s[interval] / 5 
-                  and self.ha_candle[pair] == -1 
-                  and last_price < open_price 
-                  and last_price > 0.998 * open_price):
+                  and candle_age < self.interval_s[interval] / 10
+                  and datetime.now(tz=timezone.utc).timestamp() - self.last_signal[pair] > 1800 
+                  and self.ha_candle[pair] == -1):
                 prediction = self.layer2(
                     base=base, quote=quote,
                     data=clean_df[:-1],
@@ -774,7 +992,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                 logging.info(f"Predicting short position {pair}. Result: {prediction}")
 
                 self.save_metrics(start, f"{base}{quote}")
-                signal = True if prediction else False
+                signal = True if prediction is True else False    
         
         return Signal(
             base=base,
@@ -817,21 +1035,9 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             `Tuple`
                 the prediction result. True if a position should be opened
 
-        """
-        # define all the necessary features
-        ema_slope_ = EMASlope()
-        ema_relationship_ = EMARelationship()
-        rvol_ = RVOL()
-        vwap_ = VWAP()
-        cci_ = CCI()
-        adx_ = AverageDirectionalIndex()
-        dm_ = DirectionalMovement()
-        bollingermidband_ = BollingerMidBand()
-        
+        """        
         # combine the features
-        features = [ema_slope_, ema_relationship_,
-                    rvol_, vwap_, cci_,
-                    adx_, dm_, bollingermidband_]
+        features = self.get_features(self.features)
         features = [pd.DataFrame({feature.feature_name: feature.preprocess(data)}) 
                     for feature in features]
         aggregated_features = pd.concat(features, axis=1)
@@ -839,8 +1045,8 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
         feature_cols = list(aggregated_features.columns)
         aggregated_data = pd.concat([data, aggregated_features], axis=1)
         aggregated_data.dropna(axis=0, inplace=True)
-        ohlcv_cols = ["open", "high", "low", "close", "volume"]
-        aggregated_data = aggregated_data[ohlcv_cols+feature_cols]
+        volume_col = ["volume"]
+        aggregated_data = aggregated_data[volume_col+feature_cols]
         
         for column in list(aggregated_data.columns):
             series = aggregated_data[column]
@@ -852,7 +1058,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
         direction = "long" if ha_trend == 1 else "short"
         prediction = self.models[direction][f"{base}{quote}"].predict(
             model_input)[0]
-        return True if int(prediction) == 1 else 0
+        return True if int(prediction) == 1 else False
 
     def find_d_rolling(self, d, series: pd.Series) -> float:
         """
@@ -896,7 +1102,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
         adf = adfuller(series, maxlag=1, autolag=None)
         p_val = adf[1]
         return p_val <= significance
-
+    
 
 class HeikinAshiRegression(HeikinAshiBase):
     """ Heikin Ashi Regression strategy implementation
@@ -938,6 +1144,8 @@ class HeikinAshiRegression(HeikinAshiBase):
             endpoint=endpoint,
             expiration_minutes=expiration_minutes
         )
+        self.interval_s = {"15m": 900,
+                           "1h": 3600}
 
     def layer2(self,
                base: str,
@@ -996,6 +1204,116 @@ class HeikinAshiRegression(HeikinAshiBase):
             _direction = reg_result['predictions']['direction']
             _n_ticks = reg_result['predictions']['n_tick_forward']
         return _spread, _direction, _n_ticks, base, quote
+    
+    def scout(self,
+          base: str,
+          quote: str,
+          dataframe: pd.DataFrame,
+          callback: callable) -> Union[Signal, None]:
+        """ Scouts potential signals based on Heikin Ashi candles and TFT 1m predictions
+
+            Parameters
+            ----------
+            base: `str`
+                base to predict
+            quote: `str`
+                the pair's quote
+            dataframe: `pd.DataFrame`
+                the dataframe of the timeseries data to predict
+            callback: `callable`
+                a function which is called if the signal is closed
+
+            Returns
+            -------
+            `Union[Signal, None]`
+                a signal object, is returned if the conditions to create a
+                signal are met. Otherwie returns None
+
+        """
+        start = time.time()
+        signal = False
+        clean_df = dataframe.copy()
+        # format the clean df before inference
+        clean_df.rename(columns=dict(timeframe="interval",
+                                     symbol="ticker",
+                                     taker_buy_base_vol="taker_buy_asset_vol"),
+                        inplace=True)
+        clean_df = clean_df[
+            ['open', 'high', 'low', 'close', 'volume', 'close_time',
+             'quote_asset_volume', 'number_of_trades', 'taker_buy_asset_vol',
+             'taker_buy_quote_vol', 'datetime', 'ticker', 'interval']]
+
+        last_price = clean_df.iloc[-1].close
+        open_price = clean_df.iloc[-1].open
+        pair = f"{base}{quote}".upper()
+        
+        interval = clean_df.iloc[-1]["interval"]
+        candle_age = (self.interval_s[interval] 
+                      - ((dataframe.iloc[-1]["close_time"] / 1e3) 
+                         - datetime.now(tz=timezone.utc).timestamp()))
+
+        if (self.ha_trend[pair] == 1 
+                and self.ha_candle[pair] == 1 
+                and pair in self.pairs['long'] 
+                and last_price > open_price 
+                and self.prev_ha_trend[pair] == -1
+                and self.higher_ha_trend[pair] == 1 
+                and candle_age < self.interval_s[interval] / 15 
+                and last_price < 1.001 * open_price):
+            # inference to layer 2
+            _spread, _direction, _n_tick, base, quote = self.layer2(
+                base=base,
+                quote=quote,
+                data=clean_df.iloc[:-1].to_dict('list'),
+                mode=self.mode,
+                ha_trend=self.ha_trend[pair]
+            )
+            if _spread is None or _direction is None: return None
+            # ensure that spread is above threshold and direction matches.
+            if _spread >= self.long_spread and _direction == 1:
+                ttp = self.long_ttp
+                signal = True
+            # record the ending time of analysis
+            self.save_metrics(start, f"{base}{quote}")
+
+        # else if direction is short and squeeze is off and red candle
+        elif (self.ha_trend[pair] == -1 
+                and self.ha_candle[pair] == -1 
+                and pair in self.pairs['short'] 
+                and last_price < open_price
+                and self.prev_ha_trend[pair] == 1
+                and self.higher_ha_trend[pair] == -1
+                and candle_age < self.interval_s[interval] / 15 
+                and last_price > 0.999 * open_price):
+            # inference to layer 2
+            _spread, _direction, _n_tick, base, quote = self.layer2(
+                base=base,
+                quote=quote,
+                data=clean_df.iloc[:-1].to_dict('list'),
+                mode=self.mode,
+                ha_trend=self.ha_trend[pair]
+            )
+            if _spread is None or _direction is None: return None
+            # ensure that spread is above threshold and direction matches.
+            if _spread >= self.short_spread and _direction == 0:
+                ttp = self.short_ttp
+                signal = True
+            # record the ending time of analysis
+            self.save_metrics(start, f"{base}{quote}")
+
+        return Signal(
+            base=base,
+            quote=quote,
+            take_profit=ttp,
+            spread=_spread,
+            buffer=_n_tick,
+            purchase_price=float(last_price),
+            last_price=float(last_price),
+            direction=_direction,
+            callback=callback,
+            n_tick_forward=_n_tick,
+            expiration_minutes=self.expiration_minutes
+        ) if signal else None
 
 
 class HeikinAshiHybrid(HeikinAshiBase):

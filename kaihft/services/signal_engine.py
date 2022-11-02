@@ -52,14 +52,15 @@ def main(exchange: str,
         raise e
     # retrieve the appropriate paths for topics and database references
     if production: path='prod'; endpoint=f"predict_{strategy_params['timeframe']}"; mode="production"
-    elif exp0a: path='exp0a'; endpoint=f"EXP0A_predict_{strategy_params['timeframe']}"; mode="experiment-0a"
+    elif exp0a: path='exp0a'; endpoint=f"predict_{strategy_params['timeframe']}"; mode="experiment-0a"
     elif exp1a: path='exp1a'; endpoint=f"EXP1A_predict_{strategy_params['timeframe']}"; mode="experiment-1a"
     else: path='dev'; endpoint=f"dev_predict_{strategy_params['timeframe']}"; mode="development"
         
     # exp0a and exp1a will use dev for ticker and klines
-    ticker_kline_path = "dev" if path != "prod" else "prod"
-    ticker_topic_path = f'{ticker_kline_path}-ticker-{exchange}-{version}-sub'
-    klines_topic_path = f'{path}-klines-{exchange}-{version}-{strategy_params["timeframe"]}-sub'
+    ticker_path = "dev" if path != "prod" else "prod"
+    klines_path = "exp0a" if "exp" in path else path
+    ticker_topic_path = f'{ticker_path}-ticker-{exchange}-{version}-sub'
+    klines_topic_path = f'{klines_path}-klines-{exchange}-{version}-{strategy_params["timeframe"]}-sub'
     # use binance as signal exchange, even if the exchange is binanceusdm
     dist_topic_path = f'{path}-distribute-signal-{exchange}-{version}'
     archive_topic_path = f'{path}-signal-{exchange}-{version}'
@@ -78,7 +79,11 @@ def main(exchange: str,
         "klines": dict(id=klines_topic_path, timeout=timeout, sub=KaiSubscriberClient())}
 
     if 'HEIKIN_ASHI' in str(strategy):
-        heikin_ashi_topic_path = f'{path}-klines-{exchange}-{version}-{strategy_params["ha_timeframe"]}-sub'
+        if 'exp' in path:
+            kline_path = "exp0a"
+        else:
+            kline_path = path
+        heikin_ashi_topic_path = f'{kline_path}-klines-{exchange}-{version}-{strategy_params["ha_timeframe"]}-sub'
         params.update({"ha_klines": dict(id=heikin_ashi_topic_path, timeout=timeout, sub=KaiSubscriberClient())})
         strategy_params.update({"mode": path})
         if "use_ha_stop_dir" in strategy_params:
