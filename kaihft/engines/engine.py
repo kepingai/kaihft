@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import logging, json, asyncio, time, os
-import math
 from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 from google.cloud import pubsub_v1
@@ -9,6 +8,7 @@ from google.protobuf.duration_pb2 import Duration
 from kaihft.databases import KaiRealtimeDatabase
 from kaihft.publishers.client import KaiPublisherClient
 from kaihft.subscribers.client import KaiSubscriberClient
+from kaihft.subscribers.rabbitmq_client import KaiRabbitSubscriberClient
 from .strategy import StrategyType, get_strategy, Strategy
 from .signal import SignalStatus, init_signal_from_rtd, Signal
 import traceback
@@ -145,11 +145,9 @@ class SignalEngine():
         """
         if "ha_klines" in self.subscribers:
             ha_callback = self.strategy.calculate_heikin_ashi_trend
-#             higher_ha_callback = self.strategy.calculate_higher_heikin_ashi_trend
             await asyncio.gather(
                 self.subscribe('ticker', self.update_signals),
                 self.subscribe('ha_klines', ha_callback),
-#                 self.subscribe('higher_ha_klines', higher_ha_callback),
                 self.subscribe('klines', self.scout_signals),
                 self.listen_thresholds(self._update_thresholds),
                 self.listen_pairs(self._update_pairs),
@@ -369,8 +367,7 @@ class SignalEngine():
     
     async def subscribe(self,
                         subscription: str,
-                        callback: callable,
-                        single_stream: bool = False):
+                        callback: callable):
         """ Will begin subscription to Cloud Pub/Sub.
 
             Parameters
@@ -382,62 +379,15 @@ class SignalEngine():
             single_stream: `bool`
                 True if the whole engine is meant to subscribe in singular topic only.
         """
-        # purging the subscription if needed
-        mode = self.strategy_params["mode"]
-        sub_id = self.subscriptions_params[subscription]['id']
-        topic_id = sub_id.rsplit("-", 1)[0]
-        sub_id = f"{topic_id}-{self.strategy.name}-{subscription}-{mode}-sub"
-        _subscriber = KaiSubscriberClient()
-        subscription_path = _subscriber.client.subscription_path(
-            _subscriber.project_id, sub_id)
-        topic_path = _subscriber.client.topic_path(
-            _subscriber.project_id, topic_id)
+        rabbit_broker_url = "amqp://kepingai:kaiword@35.193.126.103:5672"
+        topic_path = self.subscriptions_params[subscription]['id']
+        _subscriber = KaiRabbitSubscriberClient(broker_url=rabbit_broker_url)
 
         logging.info(f"[{str(self.strategy_type)}] [subscription] purging the "
-                     f"subscription path for '{sub_id}' in 30 seconds ...")
-        with _subscriber.client:
-            # delete the subscription and create a new one
-            try:
-                _subscriber.client.delete_subscription(
-                    request=dict(subscription=subscription_path))
-                logging.info(f"[{str(self.strategy_type)}] [subscription] "
-                             f"deleted: {subscription_path}")
-            except Exception as e:
-                if '404' not in str(e):
-                    logging.critical(f"[{str(self.strategy_type)}] "
-                                     f"[subscription] unable to delete the "
-                                     f"path: {subscription_path}, error: {e}")
-                    raise e
-            time.sleep(30)
-            # create the same subscription with the same name
-            try:
-                retention_duration = Duration()
-                retention_duration.FromSeconds(600)  # 10 minutes retention duration
-                _subscription = _subscriber.client.create_subscription(
-                    request=dict(name=subscription_path,
-                                 topic=topic_path,
-                                 message_retention_duration=retention_duration,
-                                 ack_deadline_seconds=600)
-                )
-                logging.info(f"[{str(self.strategy_type)}] [subscription] "
-                             f"created: {_subscription}")
-            except Exception as e:
-                if '409' not in str(e):
-                    logging.critical(f"[{str(self.strategy_type)}] "
-                                     f"[subscription] unable to create the "
-                                     f"path: {subscription_path}, error: {e}")
-                    raise e
-
-        # start subscription path and futures
-        logging.info(f"[{str(self.strategy_type)}] [subscription] will wait "
-                     f"for 30 seconds before subscribing to the newly created "
-                     f"subscription entity: {subscription} ...")
-        time.sleep(30)
-        self.subscribers[subscription].subscribe(
-            subscription_id=sub_id,
-            timeout=None,
-            callback=callback,
-            single_stream=single_stream)
+                     f"subscription path for '{topic_path}' in 30 seconds ...")
+        await self.subscribers[subscription].subscribe(
+            exchange_name=topic_path,
+            callback=callback,)
             
     def update_signals(self, message: pubsub_v1.subscriber.message.Message):
         """ Update signals with the most recent data. 

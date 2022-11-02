@@ -74,13 +74,16 @@ def klines_binance_spot(klines, production, exp0a, exp1a, timeframe):
 
 @cli.command()
 @click.option('--klines', default=250, help='the length of historical klines back.')
+@click.option('--interval', default=15, help='the ticker interval in minutes')
 @click.option('--production', is_flag=True, help='publish messages to production topic.')
 @click.option('--exp0a', is_flag=True, help='publish & subscribe messages to exp0a topic.')
 @click.option('--exp1a', is_flag=True, help='publish & subscribe messages to exp1a topic.')
 @notify_failure
-def klines_binance_futures(klines, production, exp0a, exp1a):
+def klines_binance_futures(klines, interval, production, exp0a, exp1a):
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "credentials.json"
     services.klines_binance_futures.main(
         n_klines=klines,
+        interval=interval,
         markets=__MARKETS,
         production=production,
         exp0a=exp0a,
@@ -93,6 +96,7 @@ def klines_binance_futures(klines, production, exp0a, exp1a):
 @click.option('--restart-every', '-r', default=60, help='restart the pod every X minute(s)')
 @notify_failure
 def klines_binance_usdm(klines, production, timeframe, restart_every):
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "credentials.json"
     services.klines_binance_usdm.main(
         n_klines=klines,
         production=production,

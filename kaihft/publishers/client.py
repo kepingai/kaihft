@@ -50,3 +50,5 @@ class KaiPublisherClient():
         attributes.update({'origin': origin, 'username': self.username})
         future = self.client.publish(_topic_path, _data, **attributes)
         return future.result()
+
+
