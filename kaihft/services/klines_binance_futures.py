@@ -4,6 +4,7 @@ from kaihft.publishers.rabbitmq_client import KaiRabbitPublisherClient
 from binance.client import Client
 from unicorn_binance_websocket_api.unicorn_binance_websocket_api_manager import BinanceWebSocketApiManager
 
+
 def main(
     n_klines: int,
     interval: int,
@@ -11,7 +12,7 @@ def main(
     production: bool,
     exp0a: bool,
     exp1a: bool,
-    topic_path: str = 'klines-binance-{timeframe}-v0'):
+    topic_path: str = 'layer1-klines-binance-{timeframe}-v0'):
     """ Retrieve real-time binance data via websocket &
         then publish binance klines to Cloud Pub/Sub. 
         

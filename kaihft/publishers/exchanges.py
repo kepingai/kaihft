@@ -949,7 +949,7 @@ class BinanceTickerPublisher(BaseTickerKlinesPublisher):
     def __init__(self,
                  websocket: BinanceWebSocketApiManager,
                  stream_id: str,
-                 publisher: KaiPublisherClient,
+                 publisher: KaiPublisher,
                  quotes: list = ["USDT"],
                  topic_path: str = 'ticker-binance-v0',
                  restart_every: Union[int, float] = 60
@@ -1007,13 +1007,14 @@ class BinanceTickerPublisher(BaseTickerKlinesPublisher):
                 base, quote = self.get_base_quote(data['symbol'])
                 self.publisher.publish(
                     origin=self.__class__.__name__,
-                    topic_path=self.topic_path,
+                    exchange_name=self.topic_path,
+                    exchange_type="fanout",
                     data=data,
                     attributes=dict(
                         base=base,
                         quote=quote,
-                        symbol=data['symbol'],
-                        timestamp=str(data["timestamp"])))
+                        symbol=data["symbol"]
+                    ))
                 # restart the time
                 start = time.time()
             count += 1
