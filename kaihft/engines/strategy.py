@@ -474,7 +474,7 @@ class HeikinAshiBase(Strategy):
 
                 # run a separate thread to run startegy
                 klines = pd.DataFrame(
-                    json.loads(message.data.decode('utf-8'))['data'])
+                    json.loads(message.body.decode('utf-8'))['data'])
                 ha_dataframe = self.format_dataframe(klines)
 
                 # ohlc4 is a tradingview variable. It is the average of the OHLC value
@@ -799,7 +799,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
              'taker_buy_quote_vol', 'datetime', 'ticker', 'interval']]
         pair = f"{base}{quote}".upper()
         last_price = clean_df.iloc[-1].close
-        open_price = clean_df.iloc[-1].open
+        print(self.ha_trend)
         # fill the previous ha trend if it is empty
         if (pair not in self.models["long"]
         if self.ha_trend[pair] == 1

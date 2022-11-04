@@ -43,7 +43,7 @@ class KaiRabbitSubscriberClient(KaiSubscriber):
             exchange_name: str,
             queue_name: Optional[str] = None,
             binding_key: Optional[str] = None,
-            auto_ack: bool = True
+            auto_ack: bool = False
     ):
         """ Subscribe messages asynchronously.
 
@@ -76,53 +76,6 @@ class KaiRabbitSubscriberClient(KaiSubscriber):
                      f"{binding_key} and auto ack: {auto_ack}.")
         await queue.bind(exchange=exchange, routing_key=binding_key)
         await queue.consume(callback=callback, no_ack=auto_ack)
-
-    async def publish(
-            self,
-            origin: str,
-            exchange_name: str,
-            exchange_type: ExchangeType,
-            data: dict,
-            delivery_mode: DeliveryMode = DeliveryMode.NOT_PERSISTENT,
-            routing_key: str = "",
-            attributes: dict = {}
-    ):
-        """ Publish using rabbitmq asynchronously.
-
-            Parameters
-            ----------
-            origin: `str`
-                class name
-            exchange_name: `str`
-                topic name
-            exchange_type: `ExchangeType`
-                aio-pika exchange type, such as FANOUT or DIRECT
-            delivery_mode: `DeliveryMode`
-                aio-pika delivery mode object. PERSISTENT or NOT_PERSISTENT
-            data: `dict`
-                the data to publish
-            routing_key: `str`
-                routing key. Automatically use empty string if exchange_type is
-                ExchangeType.FANOUT
-            attributes: `dict`
-                the message headers
-        """
-        if exchange_type == ExchangeType.FANOUT:
-            routing_key = ""
-        logging.debug(f"[publishing] {str(exchange_type)} message on exchange: "
-                      f"{exchange_name} with routing key: '{routing_key}'.")
-        attributes.update({'origin': origin, 'username': self.username})
-        body = json.dumps({"data": data}).encode('utf-8')
-
-        async with self.connection.channel() as channel:
-            exchange = await channel.declare_exchange(
-                name=exchange_name, type=exchange_type, durable=True)
-            message = Message(
-                body=body, headers=attributes, delivery_mode=delivery_mode,
-                timestamp=datetime.now(tz=timezone.utc).timestamp()
-            )
-            await exchange.publish(message, routing_key=routing_key)
-            logging.debug(f"[publishing] finished publishing data: {body}'")
 
     async def close(self):
         """ Close the RabbitMQ client connection. """

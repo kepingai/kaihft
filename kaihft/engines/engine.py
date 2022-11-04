@@ -424,8 +424,6 @@ class SignalEngine():
                 self.ticker_counts = 1
             # add the counter for each message received
             self.ticker_counts += 1
-        # acknowledge the message only if
-        message.ack()
 
     def scout_signals(self, message: pubsub_v1.subscriber.message.Message):
         """ Will run the strategy from given klines data. 
@@ -457,8 +455,6 @@ class SignalEngine():
                 self.klines_counts = 1
             # add the counter for each message received
             self.klines_counts += 1
-        # acknowledge the message
-        message.ack()
 
     def run_strategy(self, base: str, quote: str, symbol: str, klines: dict):
         """ Run strategy to the given klines data. 
@@ -509,11 +505,14 @@ class SignalEngine():
                     and symbol not in self.signals):
                 # run technical analysis & inference to layer 2,
                 # await for futures before the remaining tasks.
-                signal = self.strategy.scout(
-                    base=base, 
-                    quote=quote,
-                    dataframe=dataframe, 
-                    callback=self.close_signal)
+                if f"{base}{quote}" in self.pairs:
+                    signal = self.strategy.scout(
+                        base=base, 
+                        quote=quote,
+                        dataframe=dataframe, 
+                        callback=self.close_signal)
+                else:
+                    signal = None
                 
                 # if signal is triggered
                 if signal: 
