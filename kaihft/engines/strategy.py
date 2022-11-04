@@ -464,10 +464,7 @@ class HeikinAshiBase(Strategy):
             klines_time = datetime.utcfromtimestamp(timestamp)
             seconds_passed = (datetime.utcnow() - klines_time).total_seconds()
             # only accept messages within 150 seconds latency
-            if 150 >= seconds_passed >= 0 and self.is_valid_cooldown(symbol):
-                # get the symbol of the klines
-                base = message.headers.get('base')
-                quote = message.headers.get('quote')
+            if 10 >= seconds_passed >= 0 and self.is_valid_cooldown(symbol):
                 # only run strategy if symbol is currently
                 # not an ongoing signal and also not currently
                 # awaiting for a result from running strategy
@@ -799,18 +796,15 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
              'taker_buy_quote_vol', 'datetime', 'ticker', 'interval']]
         pair = f"{base}{quote}".upper()
         last_price = clean_df.iloc[-1].close
-        print(self.ha_trend)
-        # fill the previous ha trend if it is empty
         if (pair not in self.models["long"]
-        if self.ha_trend[pair] == 1
+        if self.ha_trend.get(pair, 100) == 1
         else pair not in self.models["short"]):
             return
         else:
             interval = clean_df.iloc[-1]["interval"]
             candle_age = (self.interval_s[interval]
-                          - ((dataframe.iloc[-1]["close_time"] / 1e3)
+                          - ((dataframe.iloc[-1]["close_time"]/1e3)
                              - datetime.now(tz=timezone.utc).timestamp()))
-
             if (self.ha_trend[pair] == 1
                     and self.prev_ha_trend[pair] == -1
                     and candle_age < self.interval_s[interval] / 10
@@ -1094,22 +1088,19 @@ class HeikinAshiRegression(HeikinAshiBase):
              'taker_buy_quote_vol', 'datetime', 'ticker', 'interval']]
 
         last_price = clean_df.iloc[-1].close
-        open_price = clean_df.iloc[-1].open
         pair = f"{base}{quote}".upper()
 
         interval = clean_df.iloc[-1]["interval"]
         candle_age = (self.interval_s[interval]
                       - ((dataframe.iloc[-1]["close_time"] / 1e3)
                          - datetime.now(tz=timezone.utc).timestamp()))
+        print(dataframe)
 
         if (self.ha_trend[pair] == 1
-                and self.ha_candle[pair] == 1
                 and pair in self.pairs['long']
-                and last_price > open_price
                 and self.prev_ha_trend[pair] == -1
                 and self.higher_ha_trend[pair] == 1
-                and candle_age < self.interval_s[interval] / 15
-                and last_price < 1.001 * open_price):
+                and candle_age < self.interval_s[interval] / 15):
             # inference to layer 2
             _spread, _direction, _n_tick, base, quote = self.layer2(
                 base=base,
@@ -1128,13 +1119,10 @@ class HeikinAshiRegression(HeikinAshiBase):
 
         # else if direction is short and squeeze is off and red candle
         elif (self.ha_trend[pair] == -1
-              and self.ha_candle[pair] == -1
               and pair in self.pairs['short']
-              and last_price < open_price
               and self.prev_ha_trend[pair] == 1
               and self.higher_ha_trend[pair] == -1
-              and candle_age < self.interval_s[interval] / 15
-              and last_price > 0.999 * open_price):
+              and candle_age < self.interval_s[interval] / 15):
             # inference to layer 2
             _spread, _direction, _n_tick, base, quote = self.layer2(
                 base=base,

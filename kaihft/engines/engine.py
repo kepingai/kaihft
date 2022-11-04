@@ -403,19 +403,24 @@ class SignalEngine():
         if message.headers and 'timestamp' in message.headers:
             # get the attributes of the message
             symbol = message.headers.get("symbol")
-
-            if symbol in self.signals and self.signals[symbol].is_open():
-                # retrieve and decode the full data
-                data = json.loads(message.body.decode('utf-8'))['data']
-                # begin update to signal object
-                price_type = 'mark_price' if 'mark_price' in data else 'last_price'
-                last_price = float(data[price_type]) 
-                # update signal with the latest price
-                # and the local trend (if needed)
-                if 'HEIKIN_ASHI' in str(self.strategy_type) and \
-                        self.strategy_params.get("use_ha_stop_dir", False):
-                    current_trend = self.strategy.ha_trend.get(symbol, None)
-                self.signals[symbol].update(last_price, current_trend)
+            timestamp = float(message.headers.get("timestamp"))
+            seconds_passed = (datetime.now(tz=timezone.utc).timestamp()
+                              - timestamp)
+            # only accept messages within 2 seconds latency
+            if 2 >= seconds_passed >= 0 and self.is_valid_cooldown(symbol):
+                if symbol in self.signals and self.signals[symbol].is_open():
+                    # retrieve and decode the full data
+                    data = json.loads(message.body.decode('utf-8'))['data']
+                    # begin update to signal object
+                    price_type = 'mark_price' if 'mark_price' in data else 'last_price'
+                    last_price = float(data[price_type])
+                    print(symbol, last_price)
+                    # update signal with the latest price
+                    # and the local trend (if needed)
+                    if 'HEIKIN_ASHI' in str(self.strategy_type) and \
+                            self.strategy_params.get("use_ha_stop_dir", False):
+                        current_trend = self.strategy.ha_trend.get(symbol, None)
+                    self.signals[symbol].update(last_price, current_trend)
 
             if self.ticker_counts % self.log_every == 0:
                 logging.info(f"[ticker] cloud pub/sub messages running, "
@@ -442,19 +447,24 @@ class SignalEngine():
             # only run strategy if symbol is currently
             # not an ongoing signal and also not currently
             # awaiting for a result from running strategy
-            if symbol not in self.signals and symbol not in self.scouts:
-                # append the symbol in scouts
-                self.scouts.append(symbol)
-                # run a separate thread to run startegy
-                klines = json.loads(message.body.decode('utf-8'))['data']
-                self.run_strategy(base, quote, symbol, klines)
-            if self.klines_counts % self.log_every == 0:
-                logging.info(f"[klines] cloud pub/sub messages running, "
-                    f"latency: sec, last-symbol: {symbol}")
-                # reset the signal counts to 1
-                self.klines_counts = 1
-            # add the counter for each message received
-            self.klines_counts += 1
+            timestamp = float(message.headers.get("timestamp"))
+            seconds_passed = (datetime.now(tz=timezone.utc).timestamp()
+                              - timestamp)
+            # only accept messages within 2 seconds latency
+            if 10 >= seconds_passed >= 0 and self.is_valid_cooldown(symbol):
+                if symbol not in self.signals and symbol not in self.scouts:
+                    # append the symbol in scouts
+                    self.scouts.append(symbol)
+                    # run a separate thread to run startegy
+                    klines = json.loads(message.body.decode('utf-8'))['data']
+                    self.run_strategy(base, quote, symbol, klines)
+                if self.klines_counts % self.log_every == 0:
+                    logging.info(f"[klines] cloud pub/sub messages running, "
+                        f"latency: sec, last-symbol: {symbol}")
+                    # reset the signal counts to 1
+                    self.klines_counts = 1
+                # add the counter for each message received
+                self.klines_counts += 1
 
     def run_strategy(self, base: str, quote: str, symbol: str, klines: dict):
         """ Run strategy to the given klines data. 
@@ -505,14 +515,11 @@ class SignalEngine():
                     and symbol not in self.signals):
                 # run technical analysis & inference to layer 2,
                 # await for futures before the remaining tasks.
-                if f"{base}{quote}" in self.pairs:
-                    signal = self.strategy.scout(
-                        base=base, 
-                        quote=quote,
-                        dataframe=dataframe, 
-                        callback=self.close_signal)
-                else:
-                    signal = None
+                signal = self.strategy.scout(
+                    base=base,
+                    quote=quote,
+                    dataframe=dataframe,
+                    callback=self.close_signal)
                 
                 # if signal is triggered
                 if signal: 
