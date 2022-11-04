@@ -951,7 +951,7 @@ class BinanceTickerPublisher(BaseTickerKlinesPublisher):
                  stream_id: str,
                  publisher: KaiPublisher,
                  quotes: list = ["USDT"],
-                 topic_path: str = 'ticker-binance-v0',
+                 topic_path: str = 'layer1-ticker-binance-v0',
                  restart_every: Union[int, float] = 60
                  ):
         """ Publish ticker data to defined topic. 

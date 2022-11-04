@@ -164,34 +164,18 @@ class SignalEngine():
             )
         self.is_ready = True
         # using arbitrary context manager to run the subscription streams
-        with ExitStack() as es:
-            [es.enter_context(self.subscribers[sub_id].client) for sub_id in self.subscribers]
-            try:
-                self.subscribers["ticker"].streaming_pull_future.result(
-                    timeout=self.subscriptions_params["ticker"]['timeout'])
-                self.subscribers["klines"].streaming_pull_future.result(
-                    timeout=self.subscriptions_params["klines"]['timeout'])
-                if "ha_klines" in self.subscribers:
-                    self.subscribers["ha_klines"].streaming_pull_future.result(
-                        timeout=self.subscriptions_params["ha_klines"]['timeout'])
-            except TimeoutError as e:
-                # Trigger the shutdown.
-                self.subscribers["ticker"].streaming_pull_future.cancel()
-                self.subscribers["klines"].streaming_pull_future.cancel()
-                if "ha_klines" in self.subscribers:
-                    self.subscribers["ha_klines"].streaming_pull_future.cancel()
-                # Block until the shutdown is complete.
-                self.subscribers["ticker"].streaming_pull_future.result()
-                self.subscribers["klines"].streaming_pull_future.result()
-                if "ha_klines" in self.subscribers:
-                    self.subscribers["ha_klines"].streaming_pull_future.result()
-                logging.error(f"Exception caught on subscription, Error: {e}")
-            finally:
-                # close all subscription to database
-                logging.info(f"[close] proceed to close all subscriptions to database ...")
-                if self.listener_thresholds: self.listener_thresholds.close()
-                if self.listener_pairs: self.listener_pairs.close()
-                if self.listener_max_drawdowns: self.listener_max_drawdowns.close()
+        try:
+            await asyncio.Future()
+        except TimeoutError as e:
+            if "ha_klines" in self.subscribers:
+                self.subscribers["ha_klines"].streaming_pull_future.result()
+            logging.error(f"Exception caught on subscription, Error: {e}")
+        finally:
+            # close all subscription to database
+            logging.info(f"[close] proceed to close all subscriptions to database ...")
+            if self.listener_thresholds: self.listener_thresholds.close()
+            if self.listener_pairs: self.listener_pairs.close()
+            if self.listener_max_drawdowns: self.listener_max_drawdowns.close()
     
     async def listen_thresholds(self, callback: callable):
         """ Will begin subscription to thresholds in database. 
@@ -379,12 +363,11 @@ class SignalEngine():
             single_stream: `bool`
                 True if the whole engine is meant to subscribe in singular topic only.
         """
-        rabbit_broker_url = "amqp://kepingai:kaiword@35.193.126.103:5672"
         topic_path = self.subscriptions_params[subscription]['id']
-        _subscriber = KaiRabbitSubscriberClient(broker_url=rabbit_broker_url)
 
         logging.info(f"[{str(self.strategy_type)}] [subscription] purging the "
                      f"subscription path for '{topic_path}' in 30 seconds ...")
+        await self.subscribers[subscription].connect()
         await self.subscribers[subscription].subscribe(
             exchange_name=topic_path,
             callback=callback,)
@@ -398,37 +381,26 @@ class SignalEngine():
                 The message from Cloud pub/sub.
         """
         current_trend = None
-        if message.attributes and 'timestamp' in message.attributes:
+        if message.headers and 'timestamp' in message.headers:
             # get the attributes of the message
-            symbol = message.attributes.get("symbol")
-            seconds_passed = (datetime.now(tz=timezone.utc) - message.publish_time).total_seconds()
+            symbol = message.headers.get("symbol")
 
-            # only accept data below 3 seconds latency
-            if seconds_passed <= 3 and seconds_passed >= 0:
-                if symbol in self.signals and self.signals[symbol].is_open():
-                    # retrieve and decode the full data
-                    data = json.loads(message.data.decode('utf-8'))['data']
-                    # begin update to signal object
-                    price_type = 'mark_price' if 'mark_price' in data else 'last_price'
-                    last_price = float(data[price_type]) 
-                    # update signal with the latest price
-                    # and the local trend (if needed)
-                    if 'HEIKIN_ASHI' in str(self.strategy_type) and \
-                            self.strategy_params.get("use_ha_stop_dir", False):
-                        current_trend = self.strategy.ha_trend.get(symbol, None)
-                    self.signals[symbol].update(last_price, current_trend)
-
-            # restarting the pod if latency above 3 minute(s),
-            # as the safety net to handle message flooding.
-            if seconds_passed > 180 and self.is_ready:
-                logging.critical(f"[restart] restarting the signal engine due "
-                                 f"to excessive ticker message "
-                                 f"latency: {seconds_passed} seconds.")
-                if os.path.exists('tmp/healthy'): os.remove('tmp/healthy')
+            if symbol in self.signals and self.signals[symbol].is_open():
+                # retrieve and decode the full data
+                data = json.loads(message.body.decode('utf-8'))['data']
+                # begin update to signal object
+                price_type = 'mark_price' if 'mark_price' in data else 'last_price'
+                last_price = float(data[price_type]) 
+                # update signal with the latest price
+                # and the local trend (if needed)
+                if 'HEIKIN_ASHI' in str(self.strategy_type) and \
+                        self.strategy_params.get("use_ha_stop_dir", False):
+                    current_trend = self.strategy.ha_trend.get(symbol, None)
+                self.signals[symbol].update(last_price, current_trend)
 
             if self.ticker_counts % self.log_every == 0:
                 logging.info(f"[ticker] cloud pub/sub messages running, "
-                    f"latency: {seconds_passed} sec, last-symbol: {symbol}")
+                    f"latency: sec, last-symbol: {symbol}")
                 # reset the signal counts to 1
                 self.ticker_counts = 1
             # add the counter for each message received
@@ -444,27 +416,24 @@ class SignalEngine():
             message: `pubsub_v1.subscriber.message.Message`
                 The message from Cloud pub/sub.
         """
-        if message.attributes and 'timestamp' in message.attributes and self.is_ready:
+        if message.headers and 'timestamp' in message.headers and self.is_ready:
             # get the attributes of the message
-            symbol = message.attributes.get("symbol")
-            seconds_passed = (datetime.now(tz=timezone.utc) - message.publish_time).total_seconds()
-            # only accept messages within 1.5 seconds latency
-            if seconds_passed <= 10 and seconds_passed >= 0:
-                # get the symbol of the klines
-                base = message.attributes.get('base')
-                quote = message.attributes.get('quote')
-                # only run strategy if symbol is currently
-                # not an ongoing signal and also not currently
-                # awaiting for a result from running strategy
-                if symbol not in self.signals and symbol not in self.scouts:
-                    # append the symbol in scouts
-                    self.scouts.append(symbol)
-                    # run a separate thread to run startegy
-                    klines = json.loads(message.data.decode('utf-8'))['data']
-                    self.run_strategy(base, quote, symbol, klines)
+            symbol = message.headers.get("symbol")
+            # get the symbol of the klines
+            base = message.headers.get('base')
+            quote = message.headers.get('quote')
+            # only run strategy if symbol is currently
+            # not an ongoing signal and also not currently
+            # awaiting for a result from running strategy
+            if symbol not in self.signals and symbol not in self.scouts:
+                # append the symbol in scouts
+                self.scouts.append(symbol)
+                # run a separate thread to run startegy
+                klines = json.loads(message.body.decode('utf-8'))['data']
+                self.run_strategy(base, quote, symbol, klines)
             if self.klines_counts % self.log_every == 0:
                 logging.info(f"[klines] cloud pub/sub messages running, "
-                    f"latency: {seconds_passed} sec, last-symbol: {symbol}")
+                    f"latency: sec, last-symbol: {symbol}")
                 # reset the signal counts to 1
                 self.klines_counts = 1
             # add the counter for each message received

@@ -56,8 +56,8 @@ def main(exchange: str,
     elif exp1a: path='exp1a'; endpoint=f"EXP1A_predict_{strategy_params['timeframe']}"; mode="experiment-1a"
     else: path='dev'; endpoint=f"dev_predict_{strategy_params['timeframe']}"; mode="development"
 
-    ticker_topic_path = f'ticker-{exchange}-{version}'
-    klines_topic_path = f'klines-{exchange}-{version}-{strategy_params["timeframe"]}'
+    ticker_topic_path = f'layer1-ticker-{exchange}-{version}'
+    klines_topic_path = f'layer1-klines-{exchange}-{strategy_params["timeframe"]}-{version}'
     # use binance as signal exchange, even if the exchange is binanceusdm
     dist_topic_path = f'{path}-distribute-signal-{exchange}-{version}'
     archive_topic_path = f'{path}-signal-{exchange}-{version}'
@@ -71,18 +71,20 @@ def main(exchange: str,
         f"distribute: {dist_topic_path}, archive: {archive_topic_path}, "
         f"layer 2 endpoint: {endpoint}")
     # initialize signal engine class and run it
-
+    rabbit_broker_url = "amqp://kepingai:kaiword@35.193.126.103:5672"
     params = {
-        "ticker": dict(id=ticker_topic_path, timeout=timeout, sub=KaiRabbitSubscriberClient()),
-        "klines": dict(id=klines_topic_path, timeout=timeout, sub=KaiRabbitSubscriberClient())}
+        "ticker": dict(id=ticker_topic_path, timeout=timeout, sub=KaiRabbitSubscriberClient(broker_url=rabbit_broker_url)),
+        "klines": dict(id=klines_topic_path, timeout=timeout, sub=KaiRabbitSubscriberClient(broker_url=rabbit_broker_url))}
 
     if 'HEIKIN_ASHI' in str(strategy):
         if 'exp' in path:
             kline_path = "exp0a"
         else:
             kline_path = path
-        heikin_ashi_topic_path = f'klines-{exchange}-{version}-{strategy_params["ha_timeframe"]}-sub'
-        params.update({"ha_klines": dict(id=heikin_ashi_topic_path, timeout=timeout, sub=KaiRabbitSubscriberClient())})
+        heikin_ashi_topic_path = f'layer1-klines-{exchange}-{strategy_params["ha_timeframe"]}-{version}'
+        params.update({"ha_klines": dict(id=heikin_ashi_topic_path, 
+                                         timeout=timeout, 
+                                         sub=KaiRabbitSubscriberClient(broker_url=rabbit_broker_url))})
         strategy_params.update({"mode": path})
         if "use_ha_stop_dir" in strategy_params:
             if strategy_params["use_ha_stop_dir"]:
