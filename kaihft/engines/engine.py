@@ -13,6 +13,7 @@ from .strategy import StrategyType, get_strategy, Strategy
 from .signal import SignalStatus, init_signal_from_rtd, Signal
 import traceback
 import statistics
+import aio_pika
 
 
 class SignalEngine():
@@ -137,6 +138,25 @@ class SignalEngine():
         asyncio.run(self._run())
         # engine stopped!
         logging.warn(f"[stop] signal engine stops -  strategy {self.strategy} ")
+
+    async def _update_signals(self,
+                              message: aio_pika.abc.AbstractIncomingMessage):
+        async with message.process():
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, self.update_signals, message)
+
+    async def _ha_callback(self, message: aio_pika.abc.AbstractIncomingMessage):
+        async with message.process():
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                None,
+                self.strategy.calculate_heikin_ashi_trend,
+                message)
+
+    async def _scout_signals(self, message: aio_pika.abc.AbstractIncomingMessage):
+        async with message.process():
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, self.scout_signals, message)
     
     async def _run(self):
         """ Subscribe to ticker and klines subscription 
@@ -144,19 +164,18 @@ class SignalEngine():
             ongoing signals concurrently.
         """
         if "ha_klines" in self.subscribers:
-            ha_callback = self.strategy.calculate_heikin_ashi_trend
             await asyncio.gather(
-                self.subscribe('ticker', self.update_signals),
-                self.subscribe('ha_klines', ha_callback),
-                self.subscribe('klines', self.scout_signals),
+                self.subscribe('ticker', self._update_signals),
+                self.subscribe('ha_klines', self._ha_callback),
+                self.subscribe('klines', self._scout_signals),
                 self.listen_thresholds(self._update_thresholds),
                 self.listen_pairs(self._update_pairs),
                 self.listen_buffers(self._update_buffers)
             )
         else:
             await asyncio.gather(
-                self.subscribe('ticker', self.update_signals),
-                self.subscribe('klines', self.scout_signals),
+                self.subscribe('ticker', self._update_signals),
+                self.subscribe('klines', self._scout_signals),
                 self.listen_thresholds(self._update_thresholds),
                 self.listen_pairs(self._update_pairs),
                 self.listen_max_drawdowns(self._update_max_drawdowns),

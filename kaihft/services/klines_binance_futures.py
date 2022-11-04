@@ -57,7 +57,7 @@ def main(
     # and run the publisher.
     publisher = KaiRabbitPublisherClient(broker_url=rabbit_broker_url)
     klines_publisher = BinanceKlinesPublisher(
-        client=Client("",""),
+        client=Client("", ""),
         websocket=binance_websocket_api_manager,
         stream_id=stream_id,
         publisher=publisher,
