@@ -707,7 +707,39 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                            "1h": 3600}
         self.last_signal = {}
         self.models = self.load_models()
+        self.thresholds = self.load_thresholds()
         self.features = features
+
+    def load_thresholds(self) -> dict:
+        """ Load the thresholds for this strategy
+
+            Returns
+            -------
+            `dict`
+                {"long": {"BTC": btc_threshold, "ETH": eth_threshold},
+                 "short": {"BTC": btc_threshold, "ETH": eth_threshold}}
+
+        """
+        thresholds = {"long": {}, "short": {}}
+
+        try:
+            with open("models/prediction_thresholds.json", 'r') as fp:
+                threshold_data = json.load(fp)
+                for direction in ["long", "short"]:
+                    for pair in self.pairs[direction]:
+                        base = pair.replace("USDT", "")
+                        base_threshold = threshold_data.get(base, {}) \
+                            .get(direction.upper(), 0.5)
+                        thresholds[direction].update({pair: base_threshold})
+        except Exception:
+            logging.info("Threshold file not found. Proceeds with 0.5 as "
+                         "the prediction prbability threshold")
+            for direction in ["long", "short"]:
+                for pair in self.pairs[direction]:
+                    base = pair.replace("USDT", "")
+                    thresholds[direction].update({base: 0.5})
+
+        return thresholds
 
     def load_models(self) -> dict:
         """ Load the models for this strategy
@@ -815,8 +847,6 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                     data=clean_df[:-1],
                     mode=self.mode,
                     ha_trend=self.ha_trend[pair])
-                logging.info(
-                    f"Predicting long position {pair}. Result: {prediction}")
 
                 self.save_metrics(start, f"{base}{quote}")
                 signal = True if prediction is True else False
@@ -900,9 +930,11 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                 aggregated_data[column] = frac_series
         model_input = aggregated_data[-225:].values.reshape(1, -1)
         direction = "long" if ha_trend == 1 else "short"
-        prediction = self.models[direction][f"{base}{quote}"].predict(
-            model_input)[0]
-        return True if int(prediction) == 1 else False
+        y_prob = self.models[direction][f"{base}{quote}"]\
+            .predict_proba(model_input)[0][1]
+        logging.info(
+            f"Predicting long position {base}. Result: {y_prob}")
+        return True if y_prob >= self.thresholds[direction][f"{base}{quote}"] else False
 
     def find_d_rolling(self, d, series: pd.Series) -> float:
         """
