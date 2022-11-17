@@ -1,14 +1,15 @@
 import logging
 from typing import Union
 from kaihft.publishers.exchanges import BinanceTickerPublisher
-from kaihft.publishers.client import KaiPublisherClient
+from kaihft.publishers.rabbitmq_client import KaiRabbitPublisherClient
 from unicorn_binance_websocket_api.unicorn_binance_websocket_api_manager import BinanceWebSocketApiManager
+
 
 def main(markets: dict,
          production: bool,
          exp0a: bool,
          exp1a: bool,
-         topic_path: str = 'ticker-binance-v0',
+         topic_path: str = 'layer1-ticker-binance-v0',
          restart_every: Union[int, float] = 60):
     """ Retrieve real-time binance data via websocket &
         then publish binance tickers to Cloud Pub/Sub. 
@@ -29,10 +30,11 @@ def main(markets: dict,
         restart_every: `Union[int, float]`
             Restart the ticker pod every X minute(s), default is 60 minutes
     """
-    if production: topic_path = f'prod-{topic_path}'; mode="prediction"
-    elif exp0a: topic_path = f'exp0a-{topic_path}'; mode="experiment-0a"
-    elif exp1a: topic_path = f'exp1a-{topic_path}'; mode="experiment-1a"
-    else: topic_path = f'dev-{topic_path}'; mode="development"
+    rabbit_broker_url = "amqp://kepingai:kaiword@35.193.126.103:5672"
+    if production: mode = "production"
+    elif exp0a: mode = "experiment-0a"
+    elif exp1a: mode = "experiment-1a"
+    else: mode = "development"
     logging.info(f"[{mode}-mode] tickers-BINANCE-FUTURES, topic: {topic_path}, "
                  f"markets: {markets}.")
     # binance only allows 1024 subscriptions in one stream
@@ -48,7 +50,7 @@ def main(markets: dict,
         channels=channels, 
         markets=markets)
     # initialize publisher
-    publisher = KaiPublisherClient()
+    publisher = KaiRabbitPublisherClient(broker_url=rabbit_broker_url)
     # initialize binance ticker publisher
     # and run the publisher.
     ticker_publisher = BinanceTickerPublisher(

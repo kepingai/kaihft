@@ -1,16 +1,17 @@
 import pandas as pd
 import time, json, logging, asyncio
 from typing import Dict, Union
-from .client import KaiPublisherClient
 from enum import Enum
 from typing import Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from kaihft.alerts import RestartPodException
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 from unicorn_binance_websocket_api.unicorn_binance_websocket_api_manager import BinanceWebSocketApiManager
 from kaihft.databases import KaiRealtimeDatabase
-import numpy as np
+from kaihft.publishers.pub_clients import KaiPublisher
+from kaihft.publishers.client import KaiPublisherClient
+import math
 
 
 class KlineStatus(Enum):
@@ -32,7 +33,7 @@ class BaseTickerKlinesPublisher():
                  name: str,
                  websocket: any,
                  stream_id: any,
-                 publisher: KaiPublisherClient,
+                 publisher: KaiPublisher,
                  topic_path: str,
                  quotes: list,
                  log_every: int = 100000):
@@ -160,7 +161,7 @@ class BinanceUSDMKlinesPublisher(BaseTickerKlinesPublisher):
                  websocket: BinanceWebSocketApiManager,
                  markets: list,
                  stream_id: str,
-                 publisher: KaiPublisherClient,
+                 publisher: KaiPublisher,
                  database: KaiRealtimeDatabase,
                  pairs_ref: str,
                  quotes: list = ['USDT'],
@@ -333,7 +334,8 @@ class BinanceUSDMKlinesPublisher(BaseTickerKlinesPublisher):
 
                     self.publisher.publish(
                         origin=self.__class__.__name__,
-                        topic_path=self.topic_path,
+                        exchange_name=self.topic_path,
+                        exchange_type="FANOUT",
                         data=klines,
                         attributes=dict(
                             base=base,
@@ -947,9 +949,9 @@ class BinanceTickerPublisher(BaseTickerKlinesPublisher):
     def __init__(self,
                  websocket: BinanceWebSocketApiManager,
                  stream_id: str,
-                 publisher: KaiPublisherClient,
+                 publisher: KaiPublisher,
                  quotes: list = ["USDT"],
-                 topic_path: str = 'ticker-binance-v0',
+                 topic_path: str = 'layer1-ticker-binance-v0',
                  restart_every: Union[int, float] = 60
                  ):
         """ Publish ticker data to defined topic. 
@@ -973,6 +975,8 @@ class BinanceTickerPublisher(BaseTickerKlinesPublisher):
             name='BINANCE', websocket=websocket, stream_id=stream_id,
             publisher=publisher, topic_path=topic_path, quotes=quotes)
         self.restart_every = (restart_every * 60) + 10  # store in seconds
+        self.publish_every = 1
+        self.last_published = datetime.now(tz=timezone.utc).timestamp()
         logging.info(f"The binance-usdm ticker publisher will "
                      f"be restarted every {restart_every} minute(s).")
 
@@ -1001,17 +1005,20 @@ class BinanceTickerPublisher(BaseTickerKlinesPublisher):
             else:
                 stream = json.loads(oldest_stream_data_from_stream_buffer)
                 if 'data' not in stream: continue
-                data = self.format_binance_ticker_to_dict(stream['data'])
-                base, quote = self.get_base_quote(data['symbol'])
-                self.publisher.publish(
-                    origin=self.__class__.__name__,
-                    topic_path=self.topic_path,
-                    data=data,
-                    attributes=dict(
-                        base=base,
-                        quote=quote,
-                        symbol=data['symbol'],
-                        timestamp=str(data["timestamp"])))
+                if datetime.now(tz=timezone.utc).timestamp() - self.last_published > self.publish_every:
+                    data = self.format_binance_ticker_to_dict(stream['data'])
+                    base, quote = self.get_base_quote(data['symbol'])
+                    self.publisher.publish(
+                        origin=self.__class__.__name__,
+                        exchange_name=self.topic_path,
+                        exchange_type="fanout",
+                        data=data,
+                        attributes=dict(
+                            base=base,
+                            quote=quote,
+                            symbol=data["symbol"]
+                        ))
+                    self.last_published = datetime.now(tz=timezone.utc).timestamp()
                 # restart the time
                 start = time.time()
             count += 1
@@ -1036,9 +1043,10 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
             client: Client,
             websocket: BinanceWebSocketApiManager,
             stream_id: str,
-            publisher: KaiPublisherClient,
+            publisher: KaiPublisher,
             quotes: list = ["USDT"],
-            topic_path: str = 'klines-binance-v0',
+            interval: int = 15,
+            topic_path: str = 'klines-binance-{timeframe}-v0',
             n_klines: int = 250,
             markets: list = ['BTCUSDT']):
         """ Publish klines data to defined topic. As
@@ -1059,6 +1067,11 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
             markets: `list`
                 A list containing the symbols.
         """
+        if interval / 60 >= 1:
+            timeframe = f"{math.floor(interval/60)}h"
+        else:
+            timeframe = f"{interval}m"
+        topic_path = topic_path.format(timeframe=timeframe)
         super().__init__(
             name='BINANCE', websocket=websocket, stream_id=stream_id,
             publisher=publisher, topic_path=topic_path, quotes=quotes)
@@ -1067,7 +1080,12 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
         self.n_klines = n_klines
         self.markets = markets
         self.sleep = 0.05
+        self.interval = interval
+        self.intervals = {15: self.client.KLINE_INTERVAL_15MINUTE,
+                          60: self.client.KLINE_INTERVAL_1HOUR}
         self.markets_klines, self.kline_status = self.initialize_klines()
+        self.last_published = datetime.now(tz=timezone.utc).timestamp()
+        self.publish_every = 1
 
     def initialize_klines(self):
         """Initialize all historical n-klines for the specified markets."""
@@ -1075,10 +1093,9 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
         # specified interval for the hitorical klines
         markets_klines = {}
         kline_status = {}
-        _interval = 15
-        interval = self.client.KLINE_INTERVAL_15MINUTE
+        interval = self.intervals[self.interval]
         start_timestamp = (datetime.utcnow() -
-            timedelta(minutes=_interval * self.n_klines)).timestamp()
+            timedelta(minutes=self.interval * self.n_klines)).timestamp()
         for market in self.markets:
             start = time.time()
             try:
@@ -1097,7 +1114,7 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
                 symbol=symbol, interval=str(interval), klines=klines)
             # check if the market kline have closed
             kline_status[symbol] = (KlineStatus.CLOSED if
-                                    datetime.utcnow().minute % _interval == 0 else KlineStatus.OPEN)
+                                    datetime.utcnow().minute % self.interval == 0 else KlineStatus.OPEN)
             # if all successful calculate the
             # the overall execution time and delay if needed
             logging.info(f"[init] initialized klines: {market}-{interval} - with duration: {time.time() - start} seconds")
@@ -1170,17 +1187,20 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
                     if closed else KlineStatus.OPEN)
                 # update the dataframe appropriately
                 klines = self.update_klines(symbol, data)
-                base, quote = self.get_base_quote(symbol)
-                # publish klines
-                self.publisher.publish(
-                    origin=self.__class__.__name__,
-                    topic_path=self.topic_path,
-                    data=klines,
-                    attributes=dict(
-                        base=base,
-                        quote=quote,
-                        symbol=symbol,
-                        timestamp=str(stream['data']["E"])))
+                if datetime.now(tz=timezone.utc).timestamp() - self.last_published > self.publish_every:
+                    base, quote = self.get_base_quote(symbol)
+                    # publish klines
+                    self.publisher.publish(
+                        origin=self.__class__.__name__,
+                        exchange_name=self.topic_path,
+                        exchange_type="fanout",
+                        data=klines,
+                        attributes=dict(
+                            base=base,
+                            quote=quote,
+                            symbol=symbol
+                        ))
+                    self.last_published = datetime.now(tz=timezone.utc).timestamp()
                 # restart the time
                 start = time.time()
             count += 1

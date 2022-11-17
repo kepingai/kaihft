@@ -2,7 +2,7 @@ import logging, os
 from kaihft.databases import KaiRealtimeDatabase
 from kaihft.engines.strategy import StrategyType
 from kaihft.publishers.client import KaiPublisherClient
-from kaihft.subscribers.client import KaiSubscriberClient
+from kaihft.subscribers.rabbitmq_client import KaiRabbitSubscriberClient
 from kaihft.engines import SignalEngine
 
 
@@ -55,12 +55,9 @@ def main(exchange: str,
     elif exp0a: path='exp0a'; endpoint=f"predict_{strategy_params['timeframe']}"; mode="experiment-0a"
     elif exp1a: path='exp1a'; endpoint=f"EXP1A_predict_{strategy_params['timeframe']}"; mode="experiment-1a"
     else: path='dev'; endpoint=f"dev_predict_{strategy_params['timeframe']}"; mode="development"
-        
-    # exp0a and exp1a will use dev for ticker and klines
-    ticker_path = "dev" if path != "prod" else "prod"
-    klines_path = "exp0a" if "exp" in path else path
-    ticker_topic_path = f'{ticker_path}-ticker-{exchange}-{version}-sub'
-    klines_topic_path = f'{klines_path}-klines-{exchange}-{version}-{strategy_params["timeframe"]}-sub'
+
+    ticker_topic_path = f'layer1-ticker-{exchange}-{version}'
+    klines_topic_path = f'layer1-klines-{exchange}-{strategy_params["timeframe"]}-{version}'
     # use binance as signal exchange, even if the exchange is binanceusdm
     dist_topic_path = f'{path}-distribute-signal-{exchange}-{version}'
     archive_topic_path = f'{path}-signal-{exchange}-{version}'
@@ -74,17 +71,20 @@ def main(exchange: str,
         f"distribute: {dist_topic_path}, archive: {archive_topic_path}, "
         f"layer 2 endpoint: {endpoint}")
     # initialize signal engine class and run it
+    rabbit_broker_url = "amqp://kepingai:kaiword@35.193.126.103:5672"
     params = {
-        "ticker": dict(id=ticker_topic_path, timeout=timeout, sub=KaiSubscriberClient()),
-        "klines": dict(id=klines_topic_path, timeout=timeout, sub=KaiSubscriberClient())}
+        "ticker": dict(id=ticker_topic_path, timeout=timeout, sub=KaiRabbitSubscriberClient(broker_url=rabbit_broker_url)),
+        "klines": dict(id=klines_topic_path, timeout=timeout, sub=KaiRabbitSubscriberClient(broker_url=rabbit_broker_url))}
 
     if 'HEIKIN_ASHI' in str(strategy):
         if 'exp' in path:
             kline_path = "exp0a"
         else:
             kline_path = path
-        heikin_ashi_topic_path = f'{kline_path}-klines-{exchange}-{version}-{strategy_params["ha_timeframe"]}-sub'
-        params.update({"ha_klines": dict(id=heikin_ashi_topic_path, timeout=timeout, sub=KaiSubscriberClient())})
+        heikin_ashi_topic_path = f'layer1-klines-{exchange}-{strategy_params["ha_timeframe"]}-{version}'
+        params.update({"ha_klines": dict(id=heikin_ashi_topic_path, 
+                                         timeout=timeout, 
+                                         sub=KaiRabbitSubscriberClient(broker_url=rabbit_broker_url))})
         strategy_params.update({"mode": path})
         if "use_ha_stop_dir" in strategy_params:
             if strategy_params["use_ha_stop_dir"]:
