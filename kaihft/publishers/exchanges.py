@@ -3,7 +3,7 @@ import time, json, logging, asyncio
 from typing import Dict, Union
 from enum import Enum
 from typing import Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from kaihft.alerts import RestartPodException
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
@@ -975,6 +975,8 @@ class BinanceTickerPublisher(BaseTickerKlinesPublisher):
             name='BINANCE', websocket=websocket, stream_id=stream_id,
             publisher=publisher, topic_path=topic_path, quotes=quotes)
         self.restart_every = (restart_every * 60) + 10  # store in seconds
+        self.publish_every = 1
+        self.last_published = datetime.now(tz=timezone.utc).timestamp()
         logging.info(f"The binance-usdm ticker publisher will "
                      f"be restarted every {restart_every} minute(s).")
 
@@ -1003,18 +1005,20 @@ class BinanceTickerPublisher(BaseTickerKlinesPublisher):
             else:
                 stream = json.loads(oldest_stream_data_from_stream_buffer)
                 if 'data' not in stream: continue
-                data = self.format_binance_ticker_to_dict(stream['data'])
-                base, quote = self.get_base_quote(data['symbol'])
-                self.publisher.publish(
-                    origin=self.__class__.__name__,
-                    exchange_name=self.topic_path,
-                    exchange_type="fanout",
-                    data=data,
-                    attributes=dict(
-                        base=base,
-                        quote=quote,
-                        symbol=data["symbol"]
-                    ))
+                if datetime.now(tz=timezone.utc).timestamp() - self.last_published > self.publish_every:
+                    data = self.format_binance_ticker_to_dict(stream['data'])
+                    base, quote = self.get_base_quote(data['symbol'])
+                    self.publisher.publish(
+                        origin=self.__class__.__name__,
+                        exchange_name=self.topic_path,
+                        exchange_type="fanout",
+                        data=data,
+                        attributes=dict(
+                            base=base,
+                            quote=quote,
+                            symbol=data["symbol"]
+                        ))
+                    self.last_published = datetime.now(tz=timezone.utc).timestamp()
                 # restart the time
                 start = time.time()
             count += 1
@@ -1080,6 +1084,8 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
         self.intervals = {15: self.client.KLINE_INTERVAL_15MINUTE,
                           60: self.client.KLINE_INTERVAL_1HOUR}
         self.markets_klines, self.kline_status = self.initialize_klines()
+        self.last_published = datetime.now(tz=timezone.utc).timestamp()
+        self.publish_every = 1
 
     def initialize_klines(self):
         """Initialize all historical n-klines for the specified markets."""
@@ -1181,18 +1187,20 @@ class BinanceKlinesPublisher(BaseTickerKlinesPublisher):
                     if closed else KlineStatus.OPEN)
                 # update the dataframe appropriately
                 klines = self.update_klines(symbol, data)
-                base, quote = self.get_base_quote(symbol)
-                # publish klines
-                self.publisher.publish(
-                    origin=self.__class__.__name__,
-                    exchange_name=self.topic_path,
-                    exchange_type="fanout",
-                    data=klines,
-                    attributes=dict(
-                        base=base,
-                        quote=quote,
-                        symbol=symbol
-                    ))
+                if datetime.now(tz=timezone.utc).timestamp() - self.last_published > self.publish_every:
+                    base, quote = self.get_base_quote(symbol)
+                    # publish klines
+                    self.publisher.publish(
+                        origin=self.__class__.__name__,
+                        exchange_name=self.topic_path,
+                        exchange_type="fanout",
+                        data=klines,
+                        attributes=dict(
+                            base=base,
+                            quote=quote,
+                            symbol=symbol
+                        ))
+                    self.last_published = datetime.now(tz=timezone.utc).timestamp()
                 # restart the time
                 start = time.time()
             count += 1
