@@ -861,8 +861,6 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                     data=clean_df[:-1],
                     mode=self.mode,
                     ha_trend=self.ha_trend[pair])
-                logging.info(
-                    f"Predicting short position {pair}. Result: {prediction}")
 
                 self.save_metrics(start, f"{base}{quote}")
                 signal = True if prediction is True else False
@@ -933,8 +931,11 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
         y_prob = self.models[direction][f"{base}{quote}"]\
             .predict_proba(model_input)[0][1]
         logging.info(
-            f"Predicting long position {base}. Result: {y_prob}")
-        return True if y_prob >= self.thresholds[direction][f"{base}{quote}"] else False
+            f"Predicting {direction} position {base}. "
+            f"Result: {y_prob}. "
+            f"Threshold: {self.thresholds[direction][f'{base}{quote}']}")
+        return True \
+            if y_prob >= self.thresholds[direction][f"{base}{quote}"] else False
 
     def find_d_rolling(self, d, series: pd.Series) -> float:
         """
