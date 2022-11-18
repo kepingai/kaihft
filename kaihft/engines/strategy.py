@@ -1126,7 +1126,6 @@ class HeikinAshiRegression(HeikinAshiBase):
         candle_age = (self.interval_s[interval]
                       - ((dataframe.iloc[-1]["close_time"] / 1e3)
                          - datetime.now(tz=timezone.utc).timestamp()))
-        print(dataframe)
 
         if (self.ha_trend[pair] == 1
                 and pair in self.pairs['long']
