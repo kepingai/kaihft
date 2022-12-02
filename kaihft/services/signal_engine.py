@@ -71,7 +71,7 @@ def main(exchange: str,
         f"distribute: {dist_topic_path}, archive: {archive_topic_path}, "
         f"layer 2 endpoint: {endpoint}")
     # initialize signal engine class and run it
-    rabbit_broker_url = "amqp://kepingai:kaiword@35.193.126.103:5672"
+    rabbit_broker_url = "amqp://Jr7k2xVus1o1ilzTOg:ZQUi5x0NdFQ5ZcoFvA@35.184.74.57:5672"
     params = {
         "ticker": dict(id=ticker_topic_path, timeout=timeout, sub=KaiRabbitSubscriberClient(broker_url=rabbit_broker_url)),
         "klines": dict(id=klines_topic_path, timeout=timeout, sub=KaiRabbitSubscriberClient(broker_url=rabbit_broker_url))}

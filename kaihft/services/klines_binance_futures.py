@@ -33,7 +33,7 @@ def main(
         topic_path: `str`
             The topic path to publish klines.
     """
-    rabbit_broker_url = "amqp://kepingai:kaiword@35.193.126.103:5672"
+    rabbit_broker_url = "amqp://Jr7k2xVus1o1ilzTOg:ZQUi5x0NdFQ5ZcoFvA@35.184.74.57:5672"
     if production: mode="prediction"
     elif exp0a: mode="experiment-0a"
     elif exp1a: mode="experiment-1a"
