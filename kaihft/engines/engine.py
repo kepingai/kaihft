@@ -33,7 +33,8 @@ class SignalEngine():
         log_metrics_every: int,
         strategy: StrategyType = StrategyType.SUPER_TREND_SQUEEZE,
         endpoint: str = 'predict_15m',
-        strategy_params: dict = {}):
+        strategy_params: dict = {},
+        send_sdk: bool = False):
         """ Will initialize the signal engine
             to scout for potential actionable intelligence
             from ticker, klines data subscriber. This signal
@@ -118,11 +119,13 @@ class SignalEngine():
         self.subscribers = {}
         for k, v in self.subscriptions_params.items():
             self.subscribers[k] = v['sub']
-        self.kepingapi = KepingApi(api_key=os.environ["KEPING_API_KEY"],
-                                   user_id=os.environ["KEPING_USER_ID"])
-        self.keping_strategy = Strategy(
-            api=self.kepingapi,
-            strategy_id=os.environ["KEPING_STRATEGY_ID"])
+        self.send_sdk = send_sdk
+        if self.send_sdk:
+            self.kepingapi = KepingApi(api_key=os.environ["KEPING_API_KEY"],
+                                       user_id=os.environ["KEPING_USER_ID"])
+            self.keping_strategy = Strategy(
+                api=self.kepingapi,
+                strategy_id=os.environ["KEPING_STRATEGY_ID"])
     
     def run(self):
         """ Will run signal engine concurrently, 
@@ -530,7 +533,8 @@ class SignalEngine():
                     # distribute the signal
                     self.distribute_signal(signal)
                     # send the signal via kepingaiSDK
-                    self.send_signal_via_sdk(signal, action="open")
+                    if self.send_sdk:
+                        self.send_signal_via_sdk(signal, action="open")
                     # archive the signal
                     self.archive_signal(signal)
                     # update/set engine state in real-time
@@ -614,7 +618,8 @@ class SignalEngine():
             # archive the completed / expired signal to topic
             self.archive_signal(signal)
             # send close signal via sdk
-            self.send_signal_via_sdk(signal, action="closed")
+            if self.send_sdk:
+                self.send_signal_via_sdk(signal, action="closed")
             # delete the signal from signals dictionary
             del self.signals[signal.symbol]
             logging.info(f"current active signals: {self.signals.keys()}")

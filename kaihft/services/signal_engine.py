@@ -77,10 +77,6 @@ def main(exchange: str,
         "klines": dict(id=klines_topic_path, timeout=timeout, sub=KaiRabbitSubscriberClient(broker_url=rabbit_broker_url))}
 
     if 'HEIKIN_ASHI' in str(strategy):
-        if 'exp' in path:
-            kline_path = "exp0a"
-        else:
-            kline_path = path
         heikin_ashi_topic_path = f'layer1-klines-{exchange}-{strategy_params["ha_timeframe"]}-{version}'
         params.update({"ha_klines": dict(id=heikin_ashi_topic_path, 
                                          timeout=timeout, 
@@ -113,6 +109,7 @@ def main(exchange: str,
         log_metrics_every=log_metrics_every,
         strategy=strategy,
         endpoint=endpoint,
-        strategy_params=strategy_params)
+        strategy_params=strategy_params,
+        send_sdk=True if exp1a else False)
     # run the engine!
     signal_engine.run()
