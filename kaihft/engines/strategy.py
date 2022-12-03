@@ -736,8 +736,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                          "the prediction prbability threshold")
             for direction in ["long", "short"]:
                 for pair in self.pairs[direction]:
-                    base = pair.replace("USDT", "")
-                    thresholds[direction].update({base: 0.5})
+                    thresholds[direction].update({pair: 0.5})
 
         return thresholds
 
@@ -1126,7 +1125,6 @@ class HeikinAshiRegression(HeikinAshiBase):
         candle_age = (self.interval_s[interval]
                       - ((dataframe.iloc[-1]["close_time"] / 1e3)
                          - datetime.now(tz=timezone.utc).timestamp()))
-        print(dataframe)
 
         if (self.ha_trend[pair] == 1
                 and pair in self.pairs['long']

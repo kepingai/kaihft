@@ -419,7 +419,6 @@ class SignalEngine():
                     # begin update to signal object
                     price_type = 'mark_price' if 'mark_price' in data else 'last_price'
                     last_price = float(data[price_type])
-                    print(symbol, last_price)
                     # update signal with the latest price
                     # and the local trend (if needed)
                     if 'HEIKIN_ASHI' in str(self.strategy_type) and \
