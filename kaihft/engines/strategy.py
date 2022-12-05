@@ -2,7 +2,6 @@ import time
 import logging
 import pandas as pd
 import numpy as np
-# import numexpr as ne
 import pandas_ta as ta
 from enum import Enum
 from typing import Union, Tuple, Optional
@@ -607,9 +606,7 @@ class HeikinAshiBase(Strategy):
                 logging.info(f"[ha_klines] cloud pub/sub messages running, "
                              f"latency: {seconds_passed} sec, last-symbol: "
                              f"{symbol}, "
-                             f"ha_trend: {self.ha_trend} "
-                             f"previous_ha_trend: {self.prev_ha_trend} "
-                             f"previous candle_type: {self.prev_ha_type}")
+                             f"ha_trend: {self.ha_trend}")
                 # reset the signal counts to 1
                 self.ha_klines_counts = 1
             # add the counter for each message received
@@ -707,6 +704,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                            "1h": 3600}
         self.last_signal = {}
         self.models = self.load_models()
+        logging.info(f"List of models {self.models.keys()}")
         self.thresholds = self.load_thresholds()
         self.features = features
 
@@ -836,6 +834,9 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             candle_age = (self.interval_s[interval]
                           - ((dataframe.iloc[-1]["close_time"]/1e3)
                              - datetime.now(tz=timezone.utc).timestamp()))
+            logging.info(f"Time since last signal: "
+                         f"{datetime.now(tz=timezone.utc).timestamp()-self.last_signal[pair]}")
+            logging.info(f"Candle age: {candle_age}")
             if (self.ha_trend[pair] == 1
                     and self.prev_ha_trend[pair] == -1
                     and candle_age < self.interval_s[interval] / 10
@@ -860,8 +861,6 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                     data=clean_df[:-1],
                     mode=self.mode,
                     ha_trend=self.ha_trend[pair])
-                logging.info(
-                    f"Predicting short position {pair}. Result: {prediction}")
 
                 self.save_metrics(start, f"{base}{quote}")
                 signal = True if prediction is True else False
@@ -932,13 +931,11 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
         y_prob = self.models[direction][f"{base}{quote}"]\
             .predict_proba(model_input)[0][1]
         logging.info(
-            f"Predicting long position {base}. Result: {y_prob}")
+            f"Predicting {direction} position {base}. Result: {y_prob}")
         return True if y_prob >= self.thresholds[direction][f"{base}{quote}"] else False
 
     def find_d_rolling(self, d, series: pd.Series) -> float:
-        """
-
-            Parameters
+        """ Parameters
             ----------
             d: `float`
                 fractional difference order
