@@ -550,16 +550,16 @@ class HeikinAshiBase(Strategy):
                 uptrend = np.array(np.array(mavi) > np.array(kirmizi))
                 downtrend = np.array(np.array(kirmizi) > np.array(mavi))
 
-                if np.all(uptrend[-3:-1]):
+                if np.all(uptrend[-2:-1]):
                     self.ha_trend.update({symbol: 1})
-                elif np.all(downtrend[-3:-1]):
+                elif np.all(downtrend[-2:-1]):
                     self.ha_trend.update({symbol: -1})
                 else:
                     self.ha_trend.update({symbol: 0})
 
-                if uptrend[-4]:
+                if uptrend[-3]:
                     self.prev_ha_trend.update({symbol: 1})
-                elif downtrend[-4]:
+                elif downtrend[-3]:
                     self.prev_ha_trend.update({symbol: -1})
                 else:
                     self.prev_ha_trend.update({symbol: 0})
