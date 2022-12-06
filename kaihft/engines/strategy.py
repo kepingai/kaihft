@@ -834,9 +834,6 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             candle_age = (self.interval_s[interval]
                           - ((dataframe.iloc[-1]["close_time"]/1e3)
                              - datetime.now(tz=timezone.utc).timestamp()))
-            logging.info(f"Time since last signal: "
-                         f"{datetime.now(tz=timezone.utc).timestamp()-self.last_signal[pair]}")
-            logging.info(f"Candle age: {candle_age}")
             if (self.ha_trend[pair] == 1
                     and self.prev_ha_trend[pair] == -1
                     and candle_age < self.interval_s[interval] / 10
