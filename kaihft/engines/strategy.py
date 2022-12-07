@@ -839,8 +839,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             if (self.ha_trend[pair] == 1
                     and self.prev_ha_trend[pair] == -1
                     and candle_age < self.interval_s[interval] / 10
-                    and datetime.now(tz=timezone.utc).timestamp() -
-                    self.last_signal[pair] > 1800):
+                    and datetime.now(tz=timezone.utc).timestamp()-self.last_signal[pair] > 1800):
                 prediction = self.layer2(
                     base=base, quote=quote,
                     data=clean_df[:-1],
@@ -853,8 +852,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             elif (self.ha_trend[pair] == -1
                   and self.prev_ha_trend[pair] == 1
                   and candle_age < self.interval_s[interval] / 10
-                  and datetime.now(tz=timezone.utc).timestamp() -
-                  self.last_signal[pair] > 1800):
+                  and datetime.now(tz=timezone.utc).timestamp()-self.last_signal[pair] > 1800):
                 prediction = self.layer2(
                     base=base, quote=quote,
                     data=clean_df[:-1],

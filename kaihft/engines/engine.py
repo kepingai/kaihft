@@ -442,6 +442,8 @@ class SignalEngine():
             message: `pubsub_v1.subscriber.message.Message`
                 The message from Cloud pub/sub.
         """
+        print(f"timestamp in headers: {'timestamp' in message.headers}")
+        print(f"ready: {self.is_ready}")
         if message.headers and 'timestamp' in message.headers and self.is_ready:
             # get the attributes of the message
             symbol = message.headers.get("symbol")
@@ -456,6 +458,9 @@ class SignalEngine():
                               - timestamp)
             # only accept messages within 10 seconds latency
             # if 10 >= seconds_passed >= 0 and self.is_valid_cooldown(symbol):
+            print(f"seconds_passed: {seconds_passed}")
+            print(f"{symbol} not in signals: {symbol not in self.signals}")
+            print(f"{symbol} not in signals: {symbol not in self.scouts}")
             if 10 >= seconds_passed >= 0:
                 if symbol not in self.signals and symbol not in self.scouts:
                     # append the symbol in scouts
