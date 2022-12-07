@@ -442,8 +442,6 @@ class SignalEngine():
             message: `pubsub_v1.subscriber.message.Message`
                 The message from Cloud pub/sub.
         """
-        print(f"timestamp in headers: {'timestamp' in message.headers}")
-        print(f"ready: {self.is_ready}")
         if message.headers and 'timestamp' in message.headers and self.is_ready:
             # get the attributes of the message
             symbol = message.headers.get("symbol")
