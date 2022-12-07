@@ -454,8 +454,9 @@ class SignalEngine():
             timestamp = float(message.headers.get("timestamp"))
             seconds_passed = (datetime.now(tz=timezone.utc).timestamp()
                               - timestamp)
-            # only accept messages within 2 seconds latency
-            if 10 >= seconds_passed >= 0 and self.is_valid_cooldown(symbol):
+            # only accept messages within 10 seconds latency
+            # if 10 >= seconds_passed >= 0 and self.is_valid_cooldown(symbol):
+            if 10 >= seconds_passed >= 0:
                 if symbol not in self.signals and symbol not in self.scouts:
                     # append the symbol in scouts
                     self.scouts.append(symbol)
