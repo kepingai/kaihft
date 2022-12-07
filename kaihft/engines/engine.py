@@ -458,10 +458,10 @@ class SignalEngine():
                               - timestamp)
             # only accept messages within 10 seconds latency
             # if 10 >= seconds_passed >= 0 and self.is_valid_cooldown(symbol):
-            print(f"seconds_passed: {seconds_passed}")
-            print(f"{symbol} not in signals: {symbol not in self.signals}")
-            print(f"{symbol} not in signals: {symbol not in self.scouts}")
+            # print(f"seconds_passed: {seconds_passed}")
             if 10 >= seconds_passed >= 0:
+                # print(f"{symbol} not in signals: {symbol not in self.signals}")
+                # print(f"{symbol} not in signals: {symbol not in self.scouts}")
                 if symbol not in self.signals and symbol not in self.scouts:
                     # append the symbol in scouts
                     self.scouts.append(symbol)
