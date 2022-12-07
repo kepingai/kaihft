@@ -26,6 +26,8 @@ from numpy_fracdiff import fracdiff
 from scipy.optimize import brentq
 import pickle
 
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 pd.options.mode.chained_assignment = None
 
@@ -814,7 +816,6 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
         _spread = 2
         _n_tick = 8
         clean_df = dataframe.copy()
-        print(clean_df)
         # format the clean df before inference
         clean_df.rename(columns=dict(timeframe="interval",
                                      symbol="ticker",
