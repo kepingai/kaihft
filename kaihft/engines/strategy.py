@@ -814,6 +814,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
         _spread = 2
         _n_tick = 8
         clean_df = dataframe.copy()
+        print(clean_df)
         # format the clean df before inference
         clean_df.rename(columns=dict(timeframe="interval",
                                      symbol="ticker",
