@@ -827,9 +827,8 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
              'taker_buy_quote_vol', 'datetime', 'ticker', 'interval']]
         pair = f"{base}{quote}".upper()
         last_price = clean_df.iloc[-1].close
-        direction = "long" if self.ha_trend.get(pair, 100) == 1 else "short"
+        direction = "long" if self.ha_trend.get(pair, 0) == 1 else "short"
         if pair not in self.models[direction]:
-            print(f"{pair} model is not available")
             return
         else:
             interval = clean_df.iloc[-1]["interval"]
@@ -837,7 +836,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                           - ((dataframe.iloc[-1]["close_time"]/1e3)
                              - datetime.now(tz=timezone.utc).timestamp()))
             if (self.ha_trend[pair] == 1
-                    # and self.prev_ha_trend[pair] == -1
+                    and (self.prev_ha_trend[pair] == -1)
                     and candle_age < self.interval_s[interval] / 10
                     and datetime.now(tz=timezone.utc).timestamp()-self.last_signal[pair] > 1800):
                 prediction = self.layer2(
@@ -850,7 +849,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                 signal = True if prediction is True else False
 
             elif (self.ha_trend[pair] == -1
-                  # and self.prev_ha_trend[pair] == 1
+                  and (self.prev_ha_trend[pair] == 1)
                   and candle_age < self.interval_s[interval] / 10
                   and datetime.now(tz=timezone.utc).timestamp()-self.last_signal[pair] > 1800):
                 prediction = self.layer2(
