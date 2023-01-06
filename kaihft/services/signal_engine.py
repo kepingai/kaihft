@@ -71,16 +71,12 @@ def main(exchange: str,
         f"distribute: {dist_topic_path}, archive: {archive_topic_path}, "
         f"layer 2 endpoint: {endpoint}")
     # initialize signal engine class and run it
-    rabbit_broker_url = "amqp://kepingai:kaiword@35.193.126.103:5672"
+    rabbit_broker_url = "amqp://Jr7k2xVus1o1ilzTOg:ZQUi5x0NdFQ5ZcoFvA@35.184.74.57:5672"
     params = {
         "ticker": dict(id=ticker_topic_path, timeout=timeout, sub=KaiRabbitSubscriberClient(broker_url=rabbit_broker_url)),
         "klines": dict(id=klines_topic_path, timeout=timeout, sub=KaiRabbitSubscriberClient(broker_url=rabbit_broker_url))}
 
     if 'HEIKIN_ASHI' in str(strategy):
-        if 'exp' in path:
-            kline_path = "exp0a"
-        else:
-            kline_path = path
         heikin_ashi_topic_path = f'layer1-klines-{exchange}-{strategy_params["ha_timeframe"]}-{version}'
         params.update({"ha_klines": dict(id=heikin_ashi_topic_path, 
                                          timeout=timeout, 
@@ -113,6 +109,7 @@ def main(exchange: str,
         log_metrics_every=log_metrics_every,
         strategy=strategy,
         endpoint=endpoint,
-        strategy_params=strategy_params)
+        strategy_params=strategy_params,
+        send_sdk=True if exp1a else False)
     # run the engine!
     signal_engine.run()

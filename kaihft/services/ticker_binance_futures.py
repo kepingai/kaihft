@@ -30,7 +30,7 @@ def main(markets: dict,
         restart_every: `Union[int, float]`
             Restart the ticker pod every X minute(s), default is 60 minutes
     """
-    rabbit_broker_url = "amqp://kepingai:kaiword@35.193.126.103:5672"
+    rabbit_broker_url = "amqp://Jr7k2xVus1o1ilzTOg:ZQUi5x0NdFQ5ZcoFvA@35.184.74.57:5672"
     if production: mode = "production"
     elif exp0a: mode = "experiment-0a"
     elif exp1a: mode = "experiment-1a"

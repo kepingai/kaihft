@@ -2,7 +2,6 @@ import time
 import logging
 import pandas as pd
 import numpy as np
-# import numexpr as ne
 import pandas_ta as ta
 from enum import Enum
 from typing import Union, Tuple, Optional
@@ -27,6 +26,8 @@ from numpy_fracdiff import fracdiff
 from scipy.optimize import brentq
 import pickle
 
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 pd.options.mode.chained_assignment = None
 
@@ -551,16 +552,16 @@ class HeikinAshiBase(Strategy):
                 uptrend = np.array(np.array(mavi) > np.array(kirmizi))
                 downtrend = np.array(np.array(kirmizi) > np.array(mavi))
 
-                if np.all(uptrend[-3:-1]):
+                if np.all(uptrend[-2:-1]):
                     self.ha_trend.update({symbol: 1})
-                elif np.all(downtrend[-3:-1]):
+                elif np.all(downtrend[-2:-1]):
                     self.ha_trend.update({symbol: -1})
                 else:
                     self.ha_trend.update({symbol: 0})
 
-                if uptrend[-4]:
+                if uptrend[-3]:
                     self.prev_ha_trend.update({symbol: 1})
-                elif downtrend[-4]:
+                elif downtrend[-3]:
                     self.prev_ha_trend.update({symbol: -1})
                 else:
                     self.prev_ha_trend.update({symbol: 0})
@@ -607,9 +608,7 @@ class HeikinAshiBase(Strategy):
                 logging.info(f"[ha_klines] cloud pub/sub messages running, "
                              f"latency: {seconds_passed} sec, last-symbol: "
                              f"{symbol}, "
-                             f"ha_trend: {self.ha_trend} "
-                             f"previous_ha_trend: {self.prev_ha_trend} "
-                             f"previous candle_type: {self.prev_ha_type}")
+                             f"ha_trend: {self.ha_trend}")
                 # reset the signal counts to 1
                 self.ha_klines_counts = 1
             # add the counter for each message received
@@ -707,7 +706,39 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                            "1h": 3600}
         self.last_signal = {}
         self.models = self.load_models()
+        logging.info(f"List of models {self.models.keys()}")
+        self.thresholds = self.load_thresholds()
         self.features = features
+
+    def load_thresholds(self) -> dict:
+        """ Load the thresholds for this strategy
+
+            Returns
+            -------
+            `dict`
+                {"long": {"BTC": btc_threshold, "ETH": eth_threshold},
+                 "short": {"BTC": btc_threshold, "ETH": eth_threshold}}
+
+        """
+        thresholds = {"long": {}, "short": {}}
+
+        try:
+            with open("models/prediction_thresholds.json", 'r') as fp:
+                threshold_data = json.load(fp)
+                for direction in ["long", "short"]:
+                    for pair in self.pairs[direction]:
+                        base = pair.replace("USDT", "")
+                        base_threshold = threshold_data.get(base, {}) \
+                            .get(direction.upper(), 0.5)
+                        thresholds[direction].update({pair: base_threshold})
+        except Exception:
+            logging.info("Threshold file not found. Proceeds with 0.5 as "
+                         "the prediction prbability threshold")
+            for direction in ["long", "short"]:
+                for pair in self.pairs[direction]:
+                    thresholds[direction].update({pair: 0.5})
+
+        return thresholds
 
     def load_models(self) -> dict:
         """ Load the models for this strategy
@@ -796,9 +827,8 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
              'taker_buy_quote_vol', 'datetime', 'ticker', 'interval']]
         pair = f"{base}{quote}".upper()
         last_price = clean_df.iloc[-1].close
-        if (pair not in self.models["long"]
-        if self.ha_trend.get(pair, 100) == 1
-        else pair not in self.models["short"]):
+        direction = "long" if self.ha_trend.get(pair, 0) == 1 else "short"
+        if pair not in self.models[direction]:
             return
         else:
             interval = clean_df.iloc[-1]["interval"]
@@ -806,33 +836,27 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                           - ((dataframe.iloc[-1]["close_time"]/1e3)
                              - datetime.now(tz=timezone.utc).timestamp()))
             if (self.ha_trend[pair] == 1
-                    and self.prev_ha_trend[pair] == -1
+                    and (self.prev_ha_trend[pair] == -1)
                     and candle_age < self.interval_s[interval] / 10
-                    and datetime.now(tz=timezone.utc).timestamp() -
-                    self.last_signal[pair] > 1800):
+                    and datetime.now(tz=timezone.utc).timestamp()-self.last_signal[pair] > 1800):
                 prediction = self.layer2(
                     base=base, quote=quote,
                     data=clean_df[:-1],
                     mode=self.mode,
                     ha_trend=self.ha_trend[pair])
-                logging.info(
-                    f"Predicting long position {pair}. Result: {prediction}")
 
                 self.save_metrics(start, f"{base}{quote}")
                 signal = True if prediction is True else False
 
             elif (self.ha_trend[pair] == -1
-                  and self.prev_ha_trend[pair] == 1
+                  and (self.prev_ha_trend[pair] == 1)
                   and candle_age < self.interval_s[interval] / 10
-                  and datetime.now(tz=timezone.utc).timestamp() -
-                  self.last_signal[pair] > 1800):
+                  and datetime.now(tz=timezone.utc).timestamp()-self.last_signal[pair] > 1800):
                 prediction = self.layer2(
                     base=base, quote=quote,
                     data=clean_df[:-1],
                     mode=self.mode,
                     ha_trend=self.ha_trend[pair])
-                logging.info(
-                    f"Predicting short position {pair}. Result: {prediction}")
 
                 self.save_metrics(start, f"{base}{quote}")
                 signal = True if prediction is True else False
@@ -847,7 +871,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             buffer=_n_tick,
             purchase_price=float(last_price),
             last_price=float(last_price),
-            direction=1 if self.ha_trend[pair] == 1 else 0,
+            direction=0 if self.ha_trend[pair] == 1 else 1,
             callback=callback,
             n_tick_forward=_n_tick,
             expiration_minutes=self.expiration_minutes
@@ -900,14 +924,14 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                 aggregated_data[column] = frac_series
         model_input = aggregated_data[-225:].values.reshape(1, -1)
         direction = "long" if ha_trend == 1 else "short"
-        prediction = self.models[direction][f"{base}{quote}"].predict(
-            model_input)[0]
-        return True if int(prediction) == 1 else False
+        y_prob = self.models[direction][f"{base}{quote}"]\
+            .predict_proba(model_input)[0][1]
+        logging.info(
+            f"Predicting {direction} position {base}. Result: {y_prob}")
+        return True if y_prob >= self.thresholds[direction][f"{base}{quote}"] else False
 
     def find_d_rolling(self, d, series: pd.Series) -> float:
-        """
-
-            Parameters
+        """ Parameters
             ----------
             d: `float`
                 fractional difference order
@@ -1094,7 +1118,6 @@ class HeikinAshiRegression(HeikinAshiBase):
         candle_age = (self.interval_s[interval]
                       - ((dataframe.iloc[-1]["close_time"] / 1e3)
                          - datetime.now(tz=timezone.utc).timestamp()))
-        print(dataframe)
 
         if (self.ha_trend[pair] == 1
                 and pair in self.pairs['long']

@@ -1,19 +1,16 @@
 import pandas as pd
 import numpy as np
-import logging, json, asyncio, time, os
-from contextlib import ExitStack
+import logging, json, asyncio, os
 from datetime import datetime, timedelta, timezone
 from google.cloud import pubsub_v1
-from google.protobuf.duration_pb2 import Duration
 from kaihft.databases import KaiRealtimeDatabase
 from kaihft.publishers.client import KaiPublisherClient
-from kaihft.subscribers.client import KaiSubscriberClient
-from kaihft.subscribers.rabbitmq_client import KaiRabbitSubscriberClient
 from .strategy import StrategyType, get_strategy, Strategy
 from .signal import SignalStatus, init_signal_from_rtd, Signal
 import traceback
 import statistics
 import aio_pika
+from kepingai import KepingApi, Strategy
 
 
 class SignalEngine():
@@ -36,7 +33,8 @@ class SignalEngine():
         log_metrics_every: int,
         strategy: StrategyType = StrategyType.SUPER_TREND_SQUEEZE,
         endpoint: str = 'predict_15m',
-        strategy_params: dict = {}):
+        strategy_params: dict = {},
+        send_sdk: bool = False):
         """ Will initialize the signal engine
             to scout for potential actionable intelligence
             from ticker, klines data subscriber. This signal
@@ -121,6 +119,13 @@ class SignalEngine():
         self.subscribers = {}
         for k, v in self.subscriptions_params.items():
             self.subscribers[k] = v['sub']
+        self.send_sdk = send_sdk
+        if self.send_sdk:
+            self.kepingapi = KepingApi(api_key=os.environ["KEPING_API_KEY"],
+                                       user_id=os.environ["KEPING_USER_ID"])
+            self.keping_strategy = Strategy(
+                api=self.kepingapi,
+                strategy_id=os.environ["KEPING_STRATEGY_ID"])
     
     def run(self):
         """ Will run signal engine concurrently, 
@@ -414,7 +419,6 @@ class SignalEngine():
                     # begin update to signal object
                     price_type = 'mark_price' if 'mark_price' in data else 'last_price'
                     last_price = float(data[price_type])
-                    print(symbol, last_price)
                     # update signal with the latest price
                     # and the local trend (if needed)
                     if 'HEIKIN_ASHI' in str(self.strategy_type) and \
@@ -450,8 +454,12 @@ class SignalEngine():
             timestamp = float(message.headers.get("timestamp"))
             seconds_passed = (datetime.now(tz=timezone.utc).timestamp()
                               - timestamp)
-            # only accept messages within 2 seconds latency
-            if 10 >= seconds_passed >= 0 and self.is_valid_cooldown(symbol):
+            # only accept messages within 10 seconds latency
+            # if 10 >= seconds_passed >= 0 and self.is_valid_cooldown(symbol):
+            # print(f"seconds_passed: {seconds_passed}")
+            if 10 >= seconds_passed >= 0:
+                # print(f"{symbol} not in signals: {symbol not in self.signals}")
+                # print(f"{symbol} not in signals: {symbol not in self.scouts}")
                 if symbol not in self.signals and symbol not in self.scouts:
                     # append the symbol in scouts
                     self.scouts.append(symbol)
@@ -527,6 +535,9 @@ class SignalEngine():
                     self.signals[symbol] = signal
                     # distribute the signal
                     self.distribute_signal(signal)
+                    # send the signal via kepingaiSDK
+                    if self.send_sdk:
+                        self.send_signal_via_sdk(signal, action="open")
                     # archive the signal
                     self.archive_signal(signal)
                     # update/set engine state in real-time
@@ -609,6 +620,9 @@ class SignalEngine():
             self.distribute_signal(signal)
             # archive the completed / expired signal to topic
             self.archive_signal(signal)
+            # send close signal via sdk
+            if self.send_sdk:
+                self.send_signal_via_sdk(signal, action="closed")
             # delete the signal from signals dictionary
             del self.signals[signal.symbol]
             logging.info(f"current active signals: {self.signals.keys()}")
@@ -620,8 +634,29 @@ class SignalEngine():
                 
             if "HEIKIN_ASHI" in self.strategy.name:
                 self.strategy.last_signal[signal.symbol] = datetime.now(tz=timezone.utc).timestamp() 
-            
-    
+
+    def send_signal_via_sdk(self, signal: Signal, action: str):
+        """ Send the signal to kepingAI platform
+        """
+        if action == "open":
+            data = {"is_testing": False,
+                    "base": signal.base,
+                    "quote": signal.quote,
+                    "direction": "long" if signal.direction == 1 else "short"
+                    }
+            sdk_response = self.keping_strategy.open_signal(signal_params=data)
+            logging.info(f"Sending open signal to kepingAI platform {data}"
+                         f"{sdk_response}")
+        elif action == "closed":
+            data = {"is_testing": False,
+                    "base": signal.base,
+                    "quote": signal.quote,
+                    }
+
+            sdk_response = self.keping_strategy.close_signal(signal_params=data)
+            logging.info(f"Sending close signal to kepingAI platform {data}"
+                         f"{sdk_response}")
+
     def update_cooldown(self, symbol: str):
         """ Will update the cooldown counter and time of a symbol.
 
