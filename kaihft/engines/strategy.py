@@ -871,7 +871,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             buffer=_n_tick,
             purchase_price=float(last_price),
             last_price=float(last_price),
-            direction=1 if self.ha_trend[pair] == 1 else 0,
+            direction=0 if self.ha_trend[pair] == 1 else 1,
             callback=callback,
             n_tick_forward=_n_tick,
             expiration_minutes=self.expiration_minutes
