@@ -45,7 +45,8 @@ class Signal():
                  expired_at: int = None,
                  status: SignalStatus = SignalStatus.NEW,
                  expiration_minutes: Optional[Union[int, float]] = None,
-                 stop_loss: Optional[float] = None):
+                 stop_loss: Optional[float] = None,
+                 ha_reverse: bool = False):
         """ Initializing a signal class.
 
             Parameters
@@ -93,6 +94,7 @@ class Signal():
         self.take_profit = take_profit
         self.spread = spread
         self.purchase_price = purchase_price
+        self.ha_reverse = ha_reverse
 
         # specify exit price for regular take profit and checkpoint take profit
         if type(self.take_profit) == float:

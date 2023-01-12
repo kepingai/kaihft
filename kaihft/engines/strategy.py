@@ -342,6 +342,7 @@ class HeikinAshiBase(Strategy):
                     {p: 0})
                 if p not in self.prev_ha_trend: self.prev_ha_trend.update(
                     {p: 0})
+        self.natr = 0
         logging.info(f"[strategy] [{str(strategy)}] initialized the heikin-"
                      f"ashi trend and candle, ha_trend: {self.ha_trend}, "
                      f"ha_candle: {self.ha_candle}")
@@ -481,6 +482,10 @@ class HeikinAshiBase(Strategy):
                              'close']) / 4
 
                 # calculate the heiken ashi candles and rename the columns so that we can calculate the EMA
+                if symbol == "BTCUSDT":
+                    natr = ha_dataframe.ta.natr(
+                        length=14, scalar=100, drift=2, offset=1)
+                    self.natr = natr
                 ha_klines = ha_dataframe.ta.ha()
                 ha_klines = ha_klines.rename(
                     columns={'HA_open': 'open', 'HA_high': 'high',
@@ -861,6 +866,10 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                 self.save_metrics(start, f"{base}{quote}")
                 signal = True if prediction is True else False
 
+        if self.natr < 0.25:
+            direction = 0 if self.ha_trend[pair] == 1 else 1
+        else:
+            direction = 1 if self.ha_trend[pair] == 1 else 0
         return Signal(
             base=base,
             quote=quote,
@@ -871,10 +880,11 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             buffer=_n_tick,
             purchase_price=float(last_price),
             last_price=float(last_price),
-            direction=0 if self.ha_trend[pair] == 1 else 1,
+            direction=direction,
             callback=callback,
             n_tick_forward=_n_tick,
-            expiration_minutes=self.expiration_minutes
+            expiration_minutes=self.expiration_minutes,
+            ha_reverse=True if self.natr < 0.25 else False
         ) if signal else None
 
     def layer2(self,
