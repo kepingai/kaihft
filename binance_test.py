@@ -27,4 +27,4 @@ dataframe['datetime'] = dataframe.close_time.apply(
     lambda x: str(pd.to_datetime(datetime.fromtimestamp(
         (x / 1000)).strftime('%c'))))
 dataframe[ohlcv] = dataframe[ohlcv].astype('float32')
-print(dataframe.ta.natr(length=14, scalar=100, drift=2, offset=1))
+print(dataframe.ta.natr(length=14, scalar=100, drift=2, offset=1).iloc[-1])

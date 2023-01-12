@@ -484,7 +484,7 @@ class HeikinAshiBase(Strategy):
                 # calculate the heiken ashi candles and rename the columns so that we can calculate the EMA
                 if symbol == "BTCUSDT":
                     natr = ha_dataframe.ta.natr(
-                        length=14, scalar=100, drift=2, offset=1)
+                        length=14, scalar=100, drift=2, offset=1).iloc[-1]
                     self.natr = natr
                 ha_klines = ha_dataframe.ta.ha()
                 ha_klines = ha_klines.rename(
