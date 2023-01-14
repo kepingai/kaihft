@@ -411,8 +411,8 @@ class SignalEngine():
             timestamp = float(message.headers.get("timestamp"))
             seconds_passed = (datetime.now(tz=timezone.utc).timestamp()
                               - timestamp)
-            # only accept messages within 2 seconds latency
-            if 2 >= seconds_passed >= 0 and self.is_valid_cooldown(symbol):
+            # only accept messages within 5 seconds latency
+            if 5 >= seconds_passed >= 0 and self.is_valid_cooldown(symbol):
                 if symbol in self.signals and self.signals[symbol].is_open():
                     # retrieve and decode the full data
                     data = json.loads(message.body.decode('utf-8'))['data']
