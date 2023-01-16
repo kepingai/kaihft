@@ -10,7 +10,7 @@ from .signal import SignalStatus, init_signal_from_rtd, Signal
 import traceback
 import statistics
 import aio_pika
-from kepingai import KepingApi, Strategy
+from kepingai import KepingApi, Strategy, KepingApiException
 
 
 class SignalEngine():
@@ -644,18 +644,27 @@ class SignalEngine():
                     "quote": signal.quote,
                     "direction": "long" if signal.direction == 1 else "short"
                     }
-            sdk_response = self.keping_strategy.open_signal(signal_params=data)
-            logging.info(f"Sending open signal to kepingAI platform {data}"
-                         f"{sdk_response}")
+            try:
+                logging.info(f"Sending open signal to kepingAI platform {data}")
+                sdk_response = self.keping_strategy.open_signal(
+                    signal_params=data)
+
+            except KepingApiException as e:
+                logging.info(f"{e}")
+
+
         elif action == "closed":
             data = {"is_testing": False,
                     "base": signal.base,
                     "quote": signal.quote,
                     }
 
-            sdk_response = self.keping_strategy.close_signal(signal_params=data)
-            logging.info(f"Sending close signal to kepingAI platform {data}"
-                         f"{sdk_response}")
+            try:
+                logging.info(f"Sending open signal to kepingAI platform {data}")
+                sdk_response = self.keping_strategy.close_signal(
+                    signal_params=data)
+            except KepingApiException as e:
+                logging.info(f"{e}")
 
     def update_cooldown(self, symbol: str):
         """ Will update the cooldown counter and time of a symbol.
