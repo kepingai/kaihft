@@ -833,6 +833,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
         pair = f"{base}{quote}".upper()
         last_price = clean_df.iloc[-1].close
         direction = "long" if self.ha_trend.get(pair, 0) == 1 else "short"
+
         if pair not in self.models[direction]:
             return
         else:
@@ -840,6 +841,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             candle_age = (self.interval_s[interval]
                           - ((dataframe.iloc[-1]["close_time"]/1e3)
                              - datetime.now(tz=timezone.utc).timestamp()))
+            print(candle_age < self.interval_s[interval] / 10)
             if (self.ha_trend[pair] == -1
                     # and (self.prev_ha_trend[pair] == -1)
                     and candle_age < self.interval_s[interval] / 10
@@ -848,7 +850,8 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                     base=base, quote=quote,
                     data=clean_df[:-1],
                     mode=self.mode,
-                    ha_trend=self.ha_trend[pair])
+                    ha_trend=-1 * self.ha_trend[pair],
+                )
 
                 self.save_metrics(start, f"{base}{quote}")
                 signal = True if prediction is True else False
@@ -861,7 +864,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                     base=base, quote=quote,
                     data=clean_df[:-1],
                     mode=self.mode,
-                    ha_trend=self.ha_trend[pair])
+                    ha_trend=-1 * self.ha_trend[pair])
 
                 self.save_metrics(start, f"{base}{quote}")
                 signal = True if prediction is True else False

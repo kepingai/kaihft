@@ -129,7 +129,11 @@ def signal_binance_futures(strategy, version, log_every, log_metrics_every,
         strategy_params = {}
     elif strategy_params_path.endswith(".yaml"):
         with open(strategy_params_path, 'r') as file:
-            strategy_params = yaml.safe_load(file)["STRATEGY_PARAMS"]
+            env_params = yaml.safe_load(file)
+            os.environ["KEPING_API_KEY"] = env_params["KEPING_API_KEY"]
+            os.environ["KEPING_USER_ID"] = env_params["KEPING_USER_ID"]
+            os.environ["KEPING_STRATEGY_ID"] = env_params["KEPING_STRATEGY_ID"]
+            strategy_params = env_params["STRATEGY_PARAMS"]
     elif strategy_params_path.endswith(".json"):
         with open(strategy_params_path, 'r') as fp:
             strategy_params = json.load(fp)
