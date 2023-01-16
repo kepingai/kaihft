@@ -658,13 +658,13 @@ class SignalEngine():
                     "base": signal.base,
                     "quote": signal.quote,
                     }
-
+            
             try:
                 logging.info(f"Sending open signal to kepingAI platform {data}")
-                sdk_response = self.keping_strategy.close_signal(
-                    signal_params=data)
+                sdk_response = self.keping_strategy.close_signal(signal_params=data)
             except KepingApiException as e:
                 logging.info(f"{e}")
+
 
     def update_cooldown(self, symbol: str):
         """ Will update the cooldown counter and time of a symbol.
