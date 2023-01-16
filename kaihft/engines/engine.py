@@ -652,7 +652,6 @@ class SignalEngine():
             except KepingApiException as e:
                 logging.info(f"{e}")
 
-
         elif action == "closed":
             data = {"is_testing": False,
                     "base": signal.base,
