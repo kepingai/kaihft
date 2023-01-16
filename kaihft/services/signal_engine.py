@@ -110,6 +110,6 @@ def main(exchange: str,
         strategy=strategy,
         endpoint=endpoint,
         strategy_params=strategy_params,
-        send_sdk=True if exp1a else False)
+        send_sdk=True if exp1a else True if exp0a else False)
     # run the engine!
     signal_engine.run()
