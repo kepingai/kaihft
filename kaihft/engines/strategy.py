@@ -840,8 +840,8 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             candle_age = (self.interval_s[interval]
                           - ((dataframe.iloc[-1]["close_time"]/1e3)
                              - datetime.now(tz=timezone.utc).timestamp()))
-            if (self.ha_trend[pair] == 1
-                    and (self.prev_ha_trend[pair] == -1)
+            if (self.ha_trend[pair] == -1
+                    # and (self.prev_ha_trend[pair] == -1)
                     and candle_age < self.interval_s[interval] / 10
                     and datetime.now(tz=timezone.utc).timestamp()-self.last_signal[pair] > 1800):
                 prediction = self.layer2(
@@ -853,8 +853,8 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                 self.save_metrics(start, f"{base}{quote}")
                 signal = True if prediction is True else False
 
-            elif (self.ha_trend[pair] == -1
-                  and (self.prev_ha_trend[pair] == 1)
+            elif (self.ha_trend[pair] == 1
+                  # and (self.prev_ha_trend[pair] == 1)
                   and candle_age < self.interval_s[interval] / 10
                   and datetime.now(tz=timezone.utc).timestamp()-self.last_signal[pair] > 1800):
                 prediction = self.layer2(
@@ -866,10 +866,10 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                 self.save_metrics(start, f"{base}{quote}")
                 signal = True if prediction is True else False
 
-        if self.natr < 0.25:
-            direction = 0 if self.ha_trend[pair] == 1 else 1
-        else:
-            direction = 1 if self.ha_trend[pair] == 1 else 0
+        # if self.natr < 0.25:
+        #     direction = 0 if self.ha_trend[pair] == 1 else 1
+        # else:
+        #     direction = 1 if self.ha_trend[pair] == 1 else 0
         return Signal(
             base=base,
             quote=quote,
@@ -880,7 +880,8 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             buffer=_n_tick,
             purchase_price=float(last_price),
             last_price=float(last_price),
-            direction=direction,
+            # direction=direction,
+            direction=self.ha_trend.get(pair, 0) == 1,
             callback=callback,
             n_tick_forward=_n_tick,
             expiration_minutes=self.expiration_minutes,
