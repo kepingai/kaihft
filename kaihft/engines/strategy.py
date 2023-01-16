@@ -888,7 +888,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             callback=callback,
             n_tick_forward=_n_tick,
             expiration_minutes=self.expiration_minutes,
-            ha_reverse=True if self.natr < 0.25 else False
+            ha_reverse=True
         ) if signal else None
 
     def layer2(self,
