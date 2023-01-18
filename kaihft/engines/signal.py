@@ -185,17 +185,17 @@ class Signal():
         self.last_price = last_price
         # if the heikin-ashi direction differs from the signal direction,
         # proceed to close the signal as a stop loss (STOPPED)
-        # if ha_direction is not None:
-        #     long_ha_dir_close = 1 if self.ha_reverse else -1
-        #     short_ha_dir_close = -1 if self.ha_reverse else 1
-        #     if (self.direction == 1 and ha_direction == long_ha_dir_close) or \
-        #             (self.direction == 0 and ha_direction == short_ha_dir_close):
-        #         self.update_realized_profit(status=SignalStatus.STOPPED)
-        #         logging.info(f"[ha-stopped] signal - symbol: {self.symbol}, "
-        #                      f"direction: {self.direction}, realized-spread: "
-        #                      f"{self.realized_profit}%")
-        #         self.callback(self)
-        #         return self._status
+        if ha_direction is not None:
+            long_ha_dir_close = 1 if self.ha_reverse else -1
+            short_ha_dir_close = -1 if self.ha_reverse else 1
+            if (self.direction == 1 and ha_direction == long_ha_dir_close) or \
+                    (self.direction == 0 and ha_direction == short_ha_dir_close):
+                self.update_realized_profit(status=SignalStatus.STOPPED)
+                logging.info(f"[ha-stopped] signal - symbol: {self.symbol}, "
+                             f"direction: {self.direction}, realized-spread: "
+                             f"{self.realized_profit}%")
+                self.callback(self)
+                return self._status
 
         # if last price have gone above the exit price (LONG position profit)
         # or below (SHORT position profit)

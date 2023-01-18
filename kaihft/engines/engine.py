@@ -423,7 +423,8 @@ class SignalEngine():
                     # and the local trend (if needed)
                     if 'HEIKIN_ASHI' in str(self.strategy_type) and \
                             self.strategy_params.get("use_ha_stop_dir", False):
-                        current_trend = self.strategy.ha_trend.get(symbol, None)
+                        # current_trend = self.strategy.ha_trend.get(symbol, None)
+                        current_trend = 1 if self.strategy.ha_color[symbol] == "green" else -1
                     self.signals[symbol].update(last_price, current_trend)
 
             if self.ticker_counts % self.log_every == 0:

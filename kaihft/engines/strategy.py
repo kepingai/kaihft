@@ -332,6 +332,7 @@ class HeikinAshiBase(Strategy):
         self.ha_trend, self.prev_ha_trend, self.higher_ha_trend, self.ha_cooldowns = {}, {}, {}, {}
         self.ha_candle, self.higher_ha_candle = {}, {}
         self.ha_type, self.prev_ha_type = {}, {}
+        self.ha_color, self.prev_ha_color = {}, {}
         self.higher_ha_type, self.prev_higher_ha_type = {}, {}
         self.ha_cooldown = 100  # second(s)
         for _, v in pairs.items():
@@ -597,6 +598,8 @@ class HeikinAshiBase(Strategy):
                             "open"])),
                               "candle_type"] = "undecided"
 
+                self.ha_color.update({symbol: ha_klines["color"].iloc[-1]})
+                self.prev_ha_color.update({symbol: ha_klines["color"].iloc[-2]})
                 self.ha_type.update({symbol: ha_klines["candle_type"].iloc[-1]})
                 self.prev_ha_type.update(
                     {symbol: ha_klines["candle_type"].iloc[-2]})
@@ -736,6 +739,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                         base_threshold = threshold_data.get(base, {}) \
                             .get(direction.upper(), 0.5)
                         thresholds[direction].update({pair: base_threshold})
+
         except Exception:
             logging.info("Threshold file not found. Proceeds with 0.5 as "
                          "the prediction prbability threshold")
@@ -841,7 +845,9 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             candle_age = (self.interval_s[interval]
                           - ((dataframe.iloc[-1]["close_time"]/1e3)
                              - datetime.now(tz=timezone.utc).timestamp()))
-            if (self.ha_trend[pair] == -1
+            if (self.ha_color[pair] == "green"
+                    and self.prev_ha_color[pair] == "red"
+                    # self.ha_trend[pair] == 1
                     # and (self.prev_ha_trend[pair] == -1)
                     and candle_age < self.interval_s[interval] / 10
                     and datetime.now(tz=timezone.utc).timestamp()-self.last_signal[pair] > 1800):
@@ -849,13 +855,16 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                     base=base, quote=quote,
                     data=clean_df[:-1],
                     mode=self.mode,
-                    ha_trend=-1 * self.ha_trend[pair],
+                    # ha_trend=self.ha_trend[pair],
+                    ha_trend=1
                 )
 
                 self.save_metrics(start, f"{base}{quote}")
                 signal = True if prediction is True else False
 
-            elif (self.ha_trend[pair] == 1
+            elif (self.ha_color[pair] == "red"
+                  and self.prev_ha_color[pair] == "green"
+                  #   self.ha_trend[pair] == -1
                   # and (self.prev_ha_trend[pair] == 1)
                   and candle_age < self.interval_s[interval] / 10
                   and datetime.now(tz=timezone.utc).timestamp()-self.last_signal[pair] > 1800):
@@ -863,7 +872,9 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                     base=base, quote=quote,
                     data=clean_df[:-1],
                     mode=self.mode,
-                    ha_trend=-1 * self.ha_trend[pair])
+                    # ha_trend=self.ha_trend[pair]
+                    ha_trend=-1
+                )
 
                 self.save_metrics(start, f"{base}{quote}")
                 signal = True if prediction is True else False
@@ -883,12 +894,12 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             purchase_price=float(last_price),
             last_price=float(last_price),
             # direction=direction,
-            direction=1 if self.ha_trend[pair] == 1 else 0,
+            direction=1 if self.ha_color[pair] == "green" else 0,
             callback=callback,
             n_tick_forward=_n_tick,
             expiration_minutes=self.expiration_minutes,
-            ha_reverse=True,
-            stop_loss=1.0
+            ha_reverse=False,
+            # stop_loss=1.0
         ) if signal else None
 
     def layer2(self,
