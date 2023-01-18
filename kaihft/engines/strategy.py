@@ -343,6 +343,10 @@ class HeikinAshiBase(Strategy):
                     {p: 0})
                 if p not in self.prev_ha_trend: self.prev_ha_trend.update(
                     {p: 0})
+                if p not in self.ha_color: self.ha_color.update(
+                    {p: 0})
+                if p not in self.prev_ha_color: self.prev_ha_color.update(
+                    {p: 0})
         self.natr = 0
         logging.info(f"[strategy] [{str(strategy)}] initialized the heikin-"
                      f"ashi trend and candle, ha_trend: {self.ha_trend}, "
