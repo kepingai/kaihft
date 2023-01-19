@@ -602,8 +602,8 @@ class HeikinAshiBase(Strategy):
                             "open"])),
                               "candle_type"] = "undecided"
 
-                self.ha_color.update({symbol: ha_klines["color"].iloc[-1]})
-                self.prev_ha_color.update({symbol: ha_klines["color"].iloc[-2]})
+                self.ha_color.update({symbol: ha_klines["color"].iloc[-2]})
+                self.prev_ha_color.update({symbol: ha_klines["color"].iloc[-3]})
                 self.ha_type.update({symbol: ha_klines["candle_type"].iloc[-1]})
                 self.prev_ha_type.update(
                     {symbol: ha_klines["candle_type"].iloc[-2]})
