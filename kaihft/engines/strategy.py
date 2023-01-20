@@ -332,7 +332,7 @@ class HeikinAshiBase(Strategy):
         self.ha_trend, self.prev_ha_trend, self.higher_ha_trend, self.ha_cooldowns = {}, {}, {}, {}
         self.ha_candle, self.higher_ha_candle = {}, {}
         self.ha_type, self.prev_ha_type = {}, {}
-        self.ha_color, self.prev_ha_color = {}, {}
+        self.ha_colors = {}
         self.higher_ha_type, self.prev_higher_ha_type = {}, {}
         self.ha_cooldown = 100  # second(s)
         for _, v in pairs.items():
@@ -343,10 +343,8 @@ class HeikinAshiBase(Strategy):
                     {p: 0})
                 if p not in self.prev_ha_trend: self.prev_ha_trend.update(
                     {p: 0})
-                if p not in self.ha_color: self.ha_color.update(
-                    {p: 0})
-                if p not in self.prev_ha_color: self.prev_ha_color.update(
-                    {p: 0})
+                if p not in self.ha_colors: self.ha_colors.update(
+                    {p: [0, 0, 0]})
         self.natr = 0
         logging.info(f"[strategy] [{str(strategy)}] initialized the heikin-"
                      f"ashi trend and candle, ha_trend: {self.ha_trend}, "
@@ -602,8 +600,10 @@ class HeikinAshiBase(Strategy):
                             "open"])),
                               "candle_type"] = "undecided"
 
-                self.ha_color.update({symbol: ha_klines["color"].iloc[-1]})
-                self.prev_ha_color.update({symbol: ha_klines["color"].iloc[-2]})
+                self.ha_colors.update(
+                    {symbol: [ha_klines["color"].iloc[-3],
+                              ha_klines["color"].iloc[-2],
+                              ha_klines["color"].iloc[-1]]})
                 self.ha_type.update({symbol: ha_klines["candle_type"].iloc[-1]})
                 self.prev_ha_type.update(
                     {symbol: ha_klines["candle_type"].iloc[-2]})
@@ -849,8 +849,9 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             candle_age = (self.interval_s[interval]
                           - ((dataframe.iloc[-1]["close_time"]/1e3)
                              - datetime.now(tz=timezone.utc).timestamp()))
-            if (self.ha_color[pair] == "green"
-                    and self.prev_ha_color[pair] == "red"
+            if (self.ha_colors[pair][1] == "green"
+                    and self.ha_colors[pair][0] == "red"
+                    and self.ha_colors[pair][2] == "green"
                     # self.ha_trend[pair] == 1
                     # and (self.prev_ha_trend[pair] == -1)
                     and candle_age < self.interval_s[interval] / 10
@@ -866,8 +867,9 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                 self.save_metrics(start, f"{base}{quote}")
                 signal = True if prediction is True else False
 
-            elif (self.ha_color[pair] == "red"
-                  and self.prev_ha_color[pair] == "green"
+            elif (self.ha_colors[pair][1] == "red"
+                  and self.ha_colors[pair][0] == "green"
+                  and self.ha_colors[pair][2] == "red"
                   #   self.ha_trend[pair] == -1
                   # and (self.prev_ha_trend[pair] == 1)
                   and candle_age < self.interval_s[interval] / 10
@@ -894,14 +896,14 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             #              if self.ha_trend[pair] == 1
             #              else self.short_ttp),
             take_profit=(self.long_ttp
-                         if self.ha_color[pair] == 1
+                         if self.ha_colors[pair][2] == "green"
                          else self.short_ttp),
             spread=_spread,
             buffer=_n_tick,
             purchase_price=float(last_price),
             last_price=float(last_price),
             # direction=direction,
-            direction=1 if self.ha_color[pair] == "green" else 0,
+            direction=1 if self.ha_colors[pair][2] == "green" else 0,
             callback=callback,
             n_tick_forward=_n_tick,
             expiration_minutes=self.expiration_minutes,

@@ -424,10 +424,10 @@ class SignalEngine():
                     if 'HEIKIN_ASHI' in str(self.strategy_type) and \
                             self.strategy_params.get("use_ha_stop_dir", False):
                         # current_trend = self.strategy.ha_trend.get(symbol, None)
-                        current_trend = 1 if self.strategy.ha_color[symbol] == "green" else -1
+                        current_trend = 1 if self.strategy.ha_colors[symbol][2] == "green" else -1
                         logging.info(
                             f"{symbol} current trend: {current_trend}."
-                            f"Ha color: {self.strategy.ha_color[symbol]}"
+                            f"Ha color: {self.strategy.ha_colors[symbol]}"
                             f"Updating signal status")
                         self.signals[symbol].update(last_price, current_trend)
 
