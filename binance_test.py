@@ -4,7 +4,7 @@ import pandas as pd
 import pandas_ta as ta
 
 client = Client("", "")
-symbol = "BTCUSDT"
+symbol = "XRPUSDT"
 interval = "15m"
 klines = client.get_historical_klines(symbol, Client.KLINE_INTERVAL_15MINUTE, "1 day ago UTC")
 __FLOATINGS = [
@@ -27,4 +27,10 @@ dataframe['datetime'] = dataframe.close_time.apply(
     lambda x: str(pd.to_datetime(datetime.fromtimestamp(
         (x / 1000)).strftime('%c'))))
 dataframe[ohlcv] = dataframe[ohlcv].astype('float32')
-print(dataframe.ta.natr(length=14, scalar=100, drift=2, offset=1).iloc[-1])
+dataframe = dataframe.ta.ha()
+print(dataframe.iloc[-1])
+ha_klines = dataframe.rename(
+                    columns={'HA_open': 'open', 'HA_high': 'high',
+                             'HA_low': 'low', 'HA_close': 'close'})
+ha_klines.loc[ha_klines["close"] >= ha_klines["open"], "color"] = "green"
+print(ha_klines)

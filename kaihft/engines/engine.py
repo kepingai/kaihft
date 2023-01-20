@@ -664,7 +664,7 @@ class SignalEngine():
                     }
             
             try:
-                logging.info(f"Sending open signal to kepingAI platform {data}")
+                logging.info(f"Sending closed signal to kepingAI platform {data}")
                 sdk_response = self.keping_strategy.close_signal(signal_params=data)
             except KepingApiException as e:
                 logging.info(f"{e}")
