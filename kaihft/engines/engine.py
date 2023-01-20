@@ -425,7 +425,7 @@ class SignalEngine():
                             self.strategy_params.get("use_ha_stop_dir", False):
                         # current_trend = self.strategy.ha_trend.get(symbol, None)
                         current_trend = 1 if self.strategy.ha_color[symbol] == "green" else -1
-                    self.signals[symbol].update(last_price, current_trend)
+                        self.signals[symbol].update(last_price, current_trend)
 
             if self.ticker_counts % self.log_every == 0:
                 logging.info(f"[ticker] cloud pub/sub messages running, "

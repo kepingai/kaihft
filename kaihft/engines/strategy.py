@@ -890,8 +890,11 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
         return Signal(
             base=base,
             quote=quote,
+            # take_profit=(self.long_ttp
+            #              if self.ha_trend[pair] == 1
+            #              else self.short_ttp),
             take_profit=(self.long_ttp
-                         if self.ha_trend[pair] == 1
+                         if self.ha_color[pair] == 1
                          else self.short_ttp),
             spread=_spread,
             buffer=_n_tick,

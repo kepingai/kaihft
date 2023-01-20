@@ -186,10 +186,12 @@ class Signal():
         # if the heikin-ashi direction differs from the signal direction,
         # proceed to close the signal as a stop loss (STOPPED)
         if ha_direction is not None:
-            long_ha_dir_close = 1 if self.ha_reverse else -1
-            short_ha_dir_close = -1 if self.ha_reverse else 1
-            if (self.direction == 1 and ha_direction == long_ha_dir_close) or \
-                    (self.direction == 0 and ha_direction == short_ha_dir_close):
+            # long_ha_dir_close = 1 if self.ha_reverse else -1
+            # short_ha_dir_close = -1 if self.ha_reverse else 1
+            # if (self.direction == 1 and ha_direction == long_ha_dir_close) or \
+            #         (self.direction == 0 and ha_direction == short_ha_dir_close):
+            if (ha_direction == 1 and self.direction == 0
+                    or ha_direction == -1 and self.direction == 1):
                 self.update_realized_profit(status=SignalStatus.STOPPED)
                 logging.info(f"[ha-stopped] signal - symbol: {self.symbol}, "
                              f"direction: {self.direction}, realized-spread: "
