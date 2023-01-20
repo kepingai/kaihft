@@ -425,6 +425,10 @@ class SignalEngine():
                             self.strategy_params.get("use_ha_stop_dir", False):
                         # current_trend = self.strategy.ha_trend.get(symbol, None)
                         current_trend = 1 if self.strategy.ha_color[symbol] == "green" else -1
+                        logging.info(
+                            f"{symbol} current trend: {current_trend}."
+                            f"Ha color: {self.strategy.ha_color[symbol]}"
+                            f"Updating signal status")
                         self.signals[symbol].update(last_price, current_trend)
 
             if self.ticker_counts % self.log_every == 0:
