@@ -339,6 +339,7 @@ class HeikinAshiBase(Strategy):
             for p in v:
                 if p not in self.ha_trend: self.ha_trend.update({p: 0})
                 if p not in self.ha_candle: self.ha_candle.update({p: 0})
+                if p not in self.ha_type: self.ha_type.update({p: 0})
                 if p not in self.higher_ha_trend: self.higher_ha_trend.update(
                     {p: 0})
                 if p not in self.prev_ha_trend: self.prev_ha_trend.update(
@@ -852,6 +853,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             if (self.ha_colors[pair][1] == "green"
                     and self.ha_colors[pair][0] == "red"
                     and self.ha_colors[pair][2] == "green"
+                    and self.ha_type[pair] == "bullish"
                     # self.ha_trend[pair] == 1
                     # and (self.prev_ha_trend[pair] == -1)
                     and candle_age < self.interval_s[interval] / 10
@@ -870,6 +872,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             elif (self.ha_colors[pair][1] == "red"
                   and self.ha_colors[pair][0] == "green"
                   and self.ha_colors[pair][2] == "red"
+                  and self.ha_type[pair] == "bearish"
                   #   self.ha_trend[pair] == -1
                   # and (self.prev_ha_trend[pair] == 1)
                   and candle_age < self.interval_s[interval] / 10
