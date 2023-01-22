@@ -95,6 +95,7 @@ class Signal():
         self.spread = spread
         self.purchase_price = purchase_price
         self.ha_reverse = ha_reverse
+        self.ha_color_changed = False
 
         # specify exit price for regular take profit and checkpoint take profit
         if type(self.take_profit) == float:
@@ -190,14 +191,19 @@ class Signal():
             # short_ha_dir_close = -1 if self.ha_reverse else 1
             # if (self.direction == 1 and ha_direction == long_ha_dir_close) or \
             #         (self.direction == 0 and ha_direction == short_ha_dir_close):
-            if (ha_direction == 1 and self.direction == 0
-                    or ha_direction == -1 and self.direction == 1):
+            if (ha_direction == 1 and self.direction == 0 and self.ha_color_changed
+                    or ha_direction == -1 and self.direction == 1 and self.ha_color_changed):
                 self.update_realized_profit(status=SignalStatus.STOPPED)
                 logging.info(f"[ha-stopped] signal - symbol: {self.symbol}, "
                              f"direction: {self.direction}, realized-spread: "
                              f"{self.realized_profit}%")
                 self.callback(self)
                 return self._status
+
+            elif not self.ha_color_changed and self.ha_reverse:
+                if self.direction == 1 and ha_direction == 1 \
+                        or self.direction == 0 and ha_direction == -1:
+                    self.ha_color_changed = True
 
         # if last price have gone above the exit price (LONG position profit)
         # or below (SHORT position profit)

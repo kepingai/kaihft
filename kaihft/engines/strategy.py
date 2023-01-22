@@ -888,10 +888,13 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                 self.save_metrics(start, f"{base}{quote}")
                 signal = True if prediction is True else False
 
-        # if self.natr < 0.25:
-        #     direction = 0 if self.ha_trend[pair] == 1 else 1
-        # else:
-        #     direction = 1 if self.ha_trend[pair] == 1 else 0
+        if self.natr < 0.5:
+            direction = 0 if self.ha_colors[pair][2] == "green" else 1
+            ha_reverse = True
+        else:
+            direction = 1 if self.ha_colors[pair][2] == "green" else 0
+            ha_reverse = False
+
         return Signal(
             base=base,
             quote=quote,
@@ -905,12 +908,12 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             buffer=_n_tick,
             purchase_price=float(last_price),
             last_price=float(last_price),
-            # direction=direction,
-            direction=1 if self.ha_colors[pair][2] == "green" else 0,
+            direction=direction,
+            # direction=1 if self.ha_colors[pair][2] == "green" else 0,
             callback=callback,
             n_tick_forward=_n_tick,
             expiration_minutes=self.expiration_minutes,
-            ha_reverse=False,
+            ha_reverse=ha_reverse,
             # stop_loss=1.0
         ) if signal else None
 
