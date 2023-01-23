@@ -914,7 +914,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
             n_tick_forward=_n_tick,
             expiration_minutes=self.expiration_minutes,
             ha_reverse=ha_reverse,
-            # stop_loss=1.0
+            stop_loss=1.0
         ) if signal else None
 
     def layer2(self,
