@@ -888,7 +888,7 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                 self.save_metrics(start, f"{base}{quote}")
                 signal = True if prediction is True else False
 
-        if self.natr < 1:
+        if self.natr < 0.5:
             direction = 0 if self.ha_colors[pair][2] == "green" else 1
             ha_reverse = True
         else:
