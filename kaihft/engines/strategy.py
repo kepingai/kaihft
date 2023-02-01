@@ -888,36 +888,36 @@ class HeikinAshiFractionalDifference(HeikinAshiBase):
                 self.save_metrics(start, f"{base}{quote}")
                 signal = True if prediction is True else False
 
-        if self.natr < 0.5:
-            direction = 0 if self.ha_colors[pair][2] == "green" else 1
-            ha_reverse = True
+        # if self.natr < 0.5:
+        direction = 1 if self.ha_colors[pair][2] == "green" else 0
+        ha_reverse = False
 
-            return Signal(
-                base=base,
-                quote=quote,
-                # take_profit=(self.long_ttp
-                #              if self.ha_trend[pair] == 1
-                #              else self.short_ttp),
-                take_profit=(self.long_ttp
-                             if self.ha_colors[pair][2] == "green"
-                             else self.short_ttp),
-                spread=_spread,
-                buffer=_n_tick,
-                purchase_price=float(last_price),
-                last_price=float(last_price),
-                direction=direction,
-                # direction=1 if self.ha_colors[pair][2] == "green" else 0,
-                callback=callback,
-                n_tick_forward=_n_tick,
-                expiration_minutes=self.expiration_minutes,
-                ha_reverse=ha_reverse,
-                stop_loss=1.0
-            ) if signal else None
+        return Signal(
+            base=base,
+            quote=quote,
+            # take_profit=(self.long_ttp
+            #              if self.ha_trend[pair] == 1
+            #              else self.short_ttp),
+            take_profit=(self.long_ttp
+                         if self.ha_colors[pair][2] == "green"
+                         else self.short_ttp),
+            spread=_spread,
+            buffer=_n_tick,
+            purchase_price=float(last_price),
+            last_price=float(last_price),
+            direction=direction,
+            # direction=1 if self.ha_colors[pair][2] == "green" else 0,
+            callback=callback,
+            n_tick_forward=_n_tick,
+            expiration_minutes=self.expiration_minutes,
+            ha_reverse=ha_reverse,
+            stop_loss=1.0
+        ) if signal else None
 
-        else:
-            pass
-            # direction = 1 if self.ha_colors[pair][2] == "green" else 0
-            # ha_reverse = False
+        # else:
+        #     pass
+        #     # direction = 1 if self.ha_colors[pair][2] == "green" else 0
+        #     # ha_reverse = False
 
     def layer2(self,
                base: str,
